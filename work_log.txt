@@ -1,0 +1,40 @@
+5/31 
+Sound play coding done...
+#play  (audio signal)
+#play+ (audio signal to play asynch)
+#play++ (next audio signal to play)
+
+6/1 to do
+* play in PlotDlg (show the progress... pause/resume)
+* #play<> 
+
+===============as of 1:15 AM 6/1/2016
+
+
+6/23
+plot(x)   -->
+	default color is blue (left), red (right) for audio,
+	default color is dark green, margenta (for imaginary part of a complex signal) for non-audio
+
+plot(x,(color_marker_styles))	-->
+	color : one of ymcrgbwk
+	marker : one of o+*.xsd^v<>ph
+	linestyle: one of - -- : :. 
+	the order doesn't matter
+	Specified color applies both to line and marker (if you want a different color for marker, call set() later)
+	If marker is specified but linestyle is not, no line
+	If color is specified and marker is not, solid line ("-")
+	(in other words, unspecified linestyle means 
+		no line if marker is specified
+		solid if marker is not specified)
+
+	for example
+plot(x, "m-")	// default setting, margenta, solid line
+plot(x, "-")	// default setting, margenta, solid line
+plot(x, "*")	// default line color, marker *, no line
+plot(x, "c")	// cyan, solid line
+plot(x,"bo") 	// blue, o, no line
+plot(x,"bo--") 	// blue, o, dashed line
+plot(x,"ob") 	// blue, o, no line
+plot(x,"o:b") 	// blue, o, dotted
+

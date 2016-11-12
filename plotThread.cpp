@@ -56,6 +56,7 @@ void plotThread (PVOID var) // plotting
 	HANDLE ax;
 	HANDLE fig;
 	HACCEL hAcc;
+	CSignals gcf;
 	CFigure *cfig;
 	VARPLOT *messenger=(VARPLOT*)var;
 	if (main.Sig.nSamples>0)
@@ -65,11 +66,11 @@ void plotThread (PVOID var) // plotting
 			fig = OpenFigure(&rt, main.Sig, GetHWND_SIGPROC(), 0, block);
 		else
 			fig = OpenFigure(&rt, messenger->varname, main.Sig, GetHWND_SIGPROC(), 0, block);
+		if (fig==NULL) {MessageBox(NULL, "OpenFigure failed", "Auxlab", 0); return;}
 		ax = plotCall( fig, *messenger );
 		cfig = static_cast<CFigure *>(fig);
 		hAcc = GetAccel(fig);
 
-		CSignals gcf;
 		GetFigID(fig, gcf);
 		main.SetTag("gcf", gcf);
 		mShowDlg.changed=true;
@@ -80,27 +81,34 @@ void plotThread (PVOID var) // plotting
 	PostMessage(messenger->hBase, WM__PLOTDLG_CREATED, (WPARAM)messenger->varname, (LPARAM)GetCurrentThreadId());
 //	HWND hFigDlg = GetHWND_PlotDlg((HANDLE)cfig); // not necessary; redundant with cfig->m_dlg->hDlg
 	int temp1(0);
-	CSignals gcf, *tp;
-	makewmstr(wmstr);
-	FILE *fpp=fopen("msglog.txt","at");
-	fprintf(fpp,"Console=%x\n", GetConsoleWindow());
-	fclose(fpp);
+	CSignals *tp;
+//	makewmstr(wmstr);
+	//FILE *fpp=fopen("msglog.txt","at");
+	//fprintf(fpp,"Console=%x\n", GetConsoleWindow());
+	//fclose(fpp);
 	while (GetMessage (&msg, NULL, 0, 0))
 	{
-		char msgbuf[32];
-		bool cond = msg.message!= WM_NCMOUSEMOVE && msg.message!= WM_MOUSEMOVE && msg.message!= WM_TIMER && msg.message!= WM_PAINT;
-		if(wmstr[msg.message].size()>0) strcpy(msgbuf,wmstr[msg.message].c_str()); else sprintf(msgbuf, "0x%04x", msg.message);
-		if (cond)
-			fpp=fopen("msglog.txt","at"),fprintf(fpp,"msg.hwnd=%x, cfig->m_dlg->hDlg=%x, msg.umsg=%s\n", msg.hwnd, cfig->m_dlg->hDlg, msgbuf),fclose(fpp);
+//		char msgbuf[32];
+//		bool cond = msg.message!= WM_NCMOUSEMOVE && msg.message!= WM_MOUSEMOVE && msg.message!= WM_TIMER && msg.message!= WM_PAINT;
+//		if(wmstr[msg.message].size()>0) strcpy(msgbuf,wmstr[msg.message].c_str()); else sprintf(msgbuf, "0x%04x", msg.message);
+//		if (cond)
+//			fpp=fopen("msglog.txt","at"),fprintf(fpp,"msg.hwnd=%x, cfig->m_dlg->hDlg=%x, msg.umsg=%s\n", msg.hwnd, cfig->m_dlg->hDlg, msgbuf),fclose(fpp);
 		//check if msg is about the figure window created here; if so, call  TranslateAccelerator
 		//exception: if WM_DESTROY, get out of message loop
 		if (msg.message==WM_DESTROY || !cfig->m_dlg)	break;
 		temp1=TranslateAccelerator(cfig->m_dlg->hDlg, hAcc, &msg);
-		if (cond && temp1)
-			fpp=fopen("msglog.txt","at"),fprintf(fpp,"TranslateAccelerator success\n"),fclose(fpp);
+//		if (cond && temp1)
+//			fpp=fopen("msglog.txt","at"),fprintf(fpp,"TranslateAccelerator success\n"),fclose(fpp);
 		//if not or TranslateAccelerator fails do the other usual processing here ---is it really necessary? probably
 		if (!temp1)
 		{
+			if (msg.hwnd==cfig->m_dlg->hDlg &&  ((msg.message>=WM_NCLBUTTONDOWN && msg.message<=WM_NCMBUTTONDBLCLK) || ((msg.message>=WM_LBUTTONDOWN && msg.message<=WM_MBUTTONDBLCLK)) ))
+			{
+				GetFigID(fig, gcf);
+				main.SetTag("gcf", gcf);
+				mShowDlg.changed=true;
+	//			PostThreadMessage (GetCurrentThreadId(), WM__VAR_CHANGED, (WPARAM)gcf.string().c_str(), 0);
+			}
 			switch (msg.message)
 			{
 			case WM__VAR_CHANGED:
@@ -112,14 +120,17 @@ void plotThread (PVOID var) // plotting
 				break;
 			default:
 				if (msg.message==WM_KEYDOWN && msg.wParam==17 && GetParent(msg.hwnd)==cfig->m_dlg->hDlg) // Left control key for window size adjustment
+				{
+//					fpp=fopen("msglog.txt","at");fprintf(fpp,"WM_KEYDOWN, msg.wParam=17, cfig->m_dlg->hDlg=%x, msg.hwnd=%x (later equalled)\n", cfig->m_dlg->hDlg, msg.hwnd);fclose(fpp);
 					msg.hwnd = cfig->m_dlg->hDlg;
-				if (!IsDialogMessage(messenger->hBase, &msg))
+				}
+ 				if (!IsDialogMessage(messenger->hBase, &msg))
 				{
 					TranslateMessage (&msg) ;
 					DispatchMessage (&msg) ;
 				}
-				else
-					fpp=fopen("msglog.txt","at"),fprintf(fpp,"TranslateAccelerator2 success\n"),fclose(fpp);
+//				else
+//					fpp=fopen("msglog.txt","at"),fprintf(fpp,"IsDialogMessage success\n"),fclose(fpp);
 			}
 		}
 	}

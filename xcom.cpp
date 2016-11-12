@@ -18,13 +18,14 @@
 
 static FILE *fp1;
 
-double playbackblock(100.);
+char iniFile[256];
 
+double playbackblock(100.);
 uintptr_t hShowvarThread(NULL);
 uintptr_t hHistoryThread(NULL);
 char udfpath[4096];
 
-CWndDlg wnd, wndHistory;
+CWndDlg wnd;
 CShowvarDlg mShowDlg;
 CHistDlg mHistDlg;
 CSignals tp;
@@ -121,10 +122,9 @@ void ClearVar(const char*var)
 
 unsigned int WINAPI histThread (PVOID var) 
 {
-	wndHistory.hDlg = CreateDialog (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_HISTORY), GetConsoleWindow(), (DLGPROC)historyDlg);
-	if (wndHistory.hDlg==NULL) {MessageBox(NULL, "History Dlgbox creation failed.","AUXLAB",0); return 0;}
-	mHistDlg.hDlg = wndHistory.hDlg;
-	mHistDlg.OnInitDialog(NULL, (LPARAM)var);
+	mHistDlg.hDlg = CreateDialog (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_HISTORY), GetConsoleWindow(), (DLGPROC)historyDlg);
+	if (mHistDlg.hDlg==NULL) {MessageBox(NULL, "History Dlgbox creation failed.","AUXLAB",0); return 0;}
+//	mHistDlg.OnInitDialog(NULL, (LPARAM)var);
 	RECT rc, rc2;
 	int res = GetWindowRect(GetConsoleWindow(), &rc);
 	rc2 = rc;
@@ -136,13 +136,13 @@ unsigned int WINAPI histThread (PVOID var)
 	rc2.top = rc2.bottom - height/5*4;
 	int res2 = MoveWindow(mHistDlg.hDlg, rc2.left, rc2.top, width/7*4, height/5*4, 1);
 
-    SYSTEMTIME lt;
-    GetLocalTime(&lt);	
-	char buffer[256];
-	sprintf(buffer, "[%02d/%02d/%4d, %02d:%02d:%02d] wndHistory.hDlg:%x, GetWindowRect=%d, MoveWindow=%d\n", lt.wMonth, lt.wDay, lt.wYear, lt.wHour, lt.wMinute, lt.wSecond, wndHistory.hDlg, res, res2);
-	fp1=fopen("hist_disappearing_track.txt","at");
-	fprintf(fp1,buffer);
-	fclose(fp1);
+ //   SYSTEMTIME lt;
+ //   GetLocalTime(&lt);	
+	//char buffer[256];
+	//sprintf(buffer, "[%02d/%02d/%4d, %02d:%02d:%02d] wndHistory.hDlg:%x, GetWindowRect=%d, MoveWindow=%d\n", lt.wMonth, lt.wDay, lt.wYear, lt.wHour, lt.wMinute, lt.wSecond, wndHistory.hDlg, res, res2);
+	//fp1=fopen("hist_disappearing_track.txt","at");
+	//fprintf(fp1,buffer);
+	//fclose(fp1);
 
 
 	MSG         msg ;
@@ -161,9 +161,11 @@ unsigned int WINAPI histThread (PVOID var)
 unsigned int WINAPI showvarThread (PVOID var) // Thread for variable show
 {
 	HINSTANCE hModule = GetModuleHandle(NULL);
+	//FILE *fpp=fopen("showvarlog.txt","wt");
+	//fclose(fpp);
+
 	mShowDlg.hDlg = CreateDialog (hModule, MAKEINTRESOURCE(IDD_SHOWVAR), GetConsoleWindow(), (DLGPROC)showvarDlg);
 	mShowDlg.hList1 = GetDlgItem(mShowDlg.hDlg , IDC_LIST1);
-	mShowDlg.lvInit();
 	RECT rc;
 	GetWindowRect(GetConsoleWindow(), &rc);
 	int width = rc.right-rc.left;
@@ -173,6 +175,13 @@ unsigned int WINAPI showvarThread (PVOID var) // Thread for variable show
 	rc2.left = rc2.right - width/7*4+10;
 	rc2.bottom = rc.bottom;
 	rc2.top = rc2.bottom - height/5*4;
+
+	if (rc2.left<0) 
+	{
+		rc2.right -= rc2.left;
+		rc2.left = 0;
+		MoveWindow(GetConsoleWindow(), rc2.right, rc.top, width, height, 1);
+	}
 	MoveWindow(mShowDlg.hDlg, rc2.left, rc2.top, width/7*4, height/5*4, 1);
 //	SetFocus(GetConsoleWindow()); //This doesn't seem to work.
 //	SetForegroundWindow (GetConsoleWindow());
@@ -421,7 +430,7 @@ void computeandshow(char *AppPath, int code, char *buf)
 	string savesuccess;
 	bool err(false);
 	char errstr[256], filename[MAX_PATH], ext[MAX_PATH];
-	unsigned int nItems;
+	size_t nItems;
 	vector<string> varlist, tar;
 	filename[0]=0;
 	trimLeft(buf," \t");
@@ -509,6 +518,7 @@ void computeandshow(char *AppPath, int code, char *buf)
 			//		strcmp(node.str,"file") * strcmp(node.str,"include") * strcmp(node.str,"eval") )
 			//}
 			mShowDlg.changed=true;
+			mShowDlg.FillupShowVar(); // this line was added on 10/2/2016.. probably all the other things about mShowDlg.changed is no longer necessary... bjk
 			AstNode *p = (node.type==NODE_BLOCK) ? node.child : &node;
 			for (; p; p = p->next)
 				if (p->type!=T_ID && p->type!=T_NUMBER && p->type!=T_STRING) //For these node types, 100% chance that var was not changed---do not send WM__VAR_CHANGED
@@ -521,6 +531,39 @@ void computeandshow(char *AppPath, int code, char *buf)
 		}
 	}
 	printf("AUX>");
+}
+
+WORD readINI(const char *fname, CRect *rtMain, CRect *rtShowDlg, CRect *rtHistDlg)
+{
+	char errStr[256];
+	int tar[4];
+	WORD ret(0);
+	string strRead;
+	if (ReadINI (errStr, fname, "WINDOW POS", strRead)>=0 && str2array (tar, 4, strRead.c_str(), " ")==4)
+	{
+		rtMain->left = tar[0];
+		rtMain->top = tar[1];
+		rtMain->right = tar[2] + tar[0];
+		rtMain->bottom = tar[3] + tar[1];
+		ret += 1;
+	}
+	if (ReadINI (errStr, fname, "VAR VIEW POS", strRead)>=0 && str2array (tar, 4, strRead.c_str(), " ")==4)
+	{
+		rtShowDlg->left = tar[0];
+		rtShowDlg->top = tar[1];
+		rtShowDlg->right = tar[2] + tar[0];
+		rtShowDlg->bottom = tar[3] + tar[1];
+		ret += 2;
+	}
+	if (ReadINI (errStr, fname, "HIST POS", strRead)>=0 && str2array (tar, 4, strRead.c_str(), " ")==4)
+	{
+		rtHistDlg->left = tar[0];
+		rtHistDlg->top = tar[1];
+		rtHistDlg->right = tar[2] + tar[0];
+		rtHistDlg->bottom = tar[3] + tar[1];
+		ret += 4;
+	}
+	return ret;
 }
 
 int readINI(const char *fname, char *estr, int &fs, double &_block, char *path)
@@ -551,6 +594,19 @@ int writeINI(char *fname, char *estr, int fs, double _block, const char *path)
 	return 1;
 }
 
+int writeINI(const char *fname, char *estr, CRect rtMain, CRect rtShowDlg, CRect rtHistDlg)
+{
+	char errStr[256];
+	CString str;
+	str.Format("%d %d %d %d", rtMain.left, rtMain.top, rtMain.Width(), rtMain.Height());
+	if (!printfINI (errStr, fname, "WINDOW POS", "%s", str.c_str())) {strcpy(estr, errStr); return 0;}
+	str.Format("%d %d %d %d", rtShowDlg.left, rtShowDlg.top, rtShowDlg.Width(), rtShowDlg.Height());
+	if (!printfINI (errStr, fname, "VAR VIEW POS", "%s", str.c_str())) {strcpy(estr, errStr); return 0;}
+	str.Format("%d %d %d %d", rtHistDlg.left, rtHistDlg.top, rtHistDlg.Width(), rtHistDlg.Height());
+	if (!printfINI (errStr, fname, "HIST POS", "%s", str.c_str())) {strcpy(estr, errStr); return 0;}
+	return 1;
+}
+
 void closeXcom(SYSTEMTIME *lt, const char *AppPath)
 {
 	//If CTRL_CLOSE_EVENT is pressed, you have 5 seconds (that's how Console app works in Windows.... Finish all cleanup work in this timeframe.
@@ -568,7 +624,13 @@ void closeXcom(SYSTEMTIME *lt, const char *AppPath)
 	}
 	else
 		pathnotapppath.append(main.GetPath());
-	int res = writeINI("auxlab.ini", estr, main.pEnv->Fs, block, pathnotapppath.c_str());
+	int res = writeINI(iniFile, estr, main.pEnv->Fs, block, pathnotapppath.c_str());
+
+	CRect rt1, rt2, rt3;
+	GetWindowRect(GetConsoleWindow(), &rt1);
+	mShowDlg.GetWindowRect(rt2);
+	mHistDlg.GetWindowRect(rt3);
+	res = writeINI(iniFile, estr, rt1,rt2, rt3);
 	sprintf(buffer, "//\t[%02d/%02d/%4d, %02d:%02d:%02d] AUXLAB closes------", lt->wMonth, lt->wDay, lt->wYear, lt->wHour, lt->wMinute, lt->wSecond);
 	LOGHISTORY(buffer);
 	if (hShowvarThread!=NULL) PostThreadMessage(GetWindowThreadProcessId(mShowDlg.hDlg, NULL), WM__ENDTHREAD, 0, 0);
@@ -623,10 +685,10 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	vector<string> tar;
 	int fs;
 	char fullmoduleName[MAX_PATH], moduleName[MAX_PATH], AppPath[MAX_PATH];
- 	char drive[16], dir[256], ext[8], buffer[MAX_PATH], buffer2[MAX_PATH];
+ 	char drive[16], dir[256], ext[8], fname[MAX_PATH], buffer[MAX_PATH], buffer2[MAX_PATH];
 
-	FILE *fpp=fopen("msglog.txt","wt");
-	fclose(fpp);
+	//FILE *fpp=fopen("msglog.txt","wt");
+	//fclose(fpp);
 
 
 	INITCOMMONCONTROLSEX InitCtrls;
@@ -639,14 +701,6 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 //	dw = GetCurrentProcessId();
 //	AttachConsole(dw) ;
 	AttachConsole(ATTACH_PARENT_PROCESS) ;
-
-    //HMODULE hinst = LoadLibrary("graffy.dll"); 
-    //typedef void (*Install)(unsigned long,HINSTANCE h);
-    //typedef void (*Uninstall)();
-    //Install install = (Install) GetProcAddress(hinst, "?install@@YAXKPAUHINSTANCE__@@@Z");
-    //Uninstall uninstall = (Uninstall) GetProcAddress(hinst, "?uninstall@@YAXXZ");
-	//install(GetCurrentThreadId(), hInstance);
-	//uninstall();
 
 	HWND hr = GetConsoleWindow();
 	HMENU hMenu = GetSystemMenu(hr, FALSE);
@@ -661,10 +715,9 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 
 	HMODULE h = HMODULE_THIS;
  	GetModuleFileName(h, fullmoduleName, MAX_PATH);
- 	_splitpath(fullmoduleName, drive, dir, buffer, ext);
+ 	_splitpath(fullmoduleName, drive, dir, fname, ext);
  	sprintf (AppPath, "%s%s", drive, dir);
- 	sprintf (moduleName, "%s%s", buffer, ext);
-
+ 	sprintf (moduleName, "%s%s", fname, ext);
 	getVersionStringAndUpdateTitle(GetConsoleWindow(), fullmoduleName, buffer, sizeof(buffer));
 #ifndef WIN64
 	sprintf(buf, "AUXLAB %s --- Audio Processing Made Easier with AUdio syntaX", buffer);
@@ -672,10 +725,14 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	sprintf(buf, "AUXLAB %s (x64) --- Audio Processing Made Easier with AUdio syntaX", buffer);
 #endif
 	SetConsoleTitle(buf);
-	res = readINI("auxlab.ini", estr, fs, block, udfpath);
+	RECT rt;
+	GetWindowRect(hr, &rt);
+	dw = sizeof(buf);
+	GetComputerName(buf, &dw);
+	sprintf(iniFile, "%s%s_%s.ini", AppPath, fname, buf);
+	res = readINI(iniFile, estr, fs, block, udfpath);
 //	main.Sig.Reset(fs); // This is not how to do it... see below 
 	main.Reset(fs,"");
-//	main.pEnv->SetPlayBlockSize(block);
 	addp = AppPath;
 	if (strlen(udfpath)>0 && udfpath[0]!=';') addp += ';';	
 	addp += udfpath;
@@ -686,14 +743,13 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	if ((hHistoryThread = _beginthreadex (NULL, 0, histThread, (void*)AppPath, 0, NULL))==-1)
 		MessageBox(NULL, "History Thread Creation Failed.", "AUXLAB main", 0);
 	
-
 	freopen( "CON", "w", stdout ) ;
 	freopen( "CON", "r", stdin ) ;
 
 	HANDLE hStdin, hStdout; 
 	hStdout = GetStdHandle(STD_OUTPUT_HANDLE); 
 	hStdin = GetStdHandle(STD_INPUT_HANDLE); 
-    DWORD fdwMode = ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |ENABLE_WINDOW_INPUT | ENABLE_INSERT_MODE | ENABLE_EXTENDED_FLAGS | ENABLE_QUICK_EDIT_MODE; 
+    DWORD fdwMode = ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_WINDOW_INPUT | ENABLE_INSERT_MODE | ENABLE_EXTENDED_FLAGS | ENABLE_QUICK_EDIT_MODE; 
 	SetConsoleMode(hStdin, fdwMode) ;
 	if (!SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlHandler, TRUE )) MessageBox (NULL, "Console control handler error", "AUXLAB", MB_OK);
 
@@ -707,7 +763,16 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	ShowWindow(mShowDlg.hDlg,SW_SHOW);
 	ShowWindow(mHistDlg.hDlg,SW_SHOW);
 
-    SYSTEMTIME lt;
+	CRect rt1, rt2, rt3;
+	res = readINI(iniFile, &rt1, &rt2, &rt3);
+	if (res & 1)	
+		MoveWindow(hr, rt1.left, rt1.top, rt1.Width(), rt1.Height(), TRUE);
+	if (res & 2)	
+		mShowDlg.MoveWindow(rt2);
+	if (res & 4)	
+		mHistDlg.MoveWindow(rt3);
+	
+	SYSTEMTIME lt;
     GetLocalTime(&lt);	
 	sprintf(buffer2, "//\t[%02d/%02d/%4d, %02d:%02d:%02d] AUXLAB %s begins------", lt.wMonth, lt.wDay, lt.wYear, lt.wHour, lt.wMinute, lt.wSecond, buffer);
 	LOGHISTORY(buffer2);

@@ -1,9 +1,9 @@
 #define DEFAULT_FS	22050
 #define DEFAULT_BLOCK_SIZE 200.
 
-#define HISTORY_FILENAME	"auxlab_history.log"
+#define HISTORY_FILENAME	"_history"
 
-#define LOGHISTORY(MSG) { char __buf[256]; sprintf(__buf, "%s%s", AppPath, HISTORY_FILENAME); FILE* __fp_=fopen(__buf,"at"); fprintf(__fp_,"%s\n", (MSG)); fclose(__fp_); }
+#define LOGHISTORY(MSG) { FILE* __fp_=fopen(mHistDlg.logfilename,"at"); fprintf(__fp_,"%s\n", (MSG)); fclose(__fp_); }
 
 #define PRINTF_WIN(MSG) WriteFile(hStdout, (MSG), strlen((MSG)), &dw, NULL);
 

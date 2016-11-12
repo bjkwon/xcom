@@ -30,24 +30,35 @@ BOOL AboutDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 
 #define RMSDB(BUF,FORMAT1,FORMAT2,X) { double rms;	if ((rms=X)==-1.*std::numeric_limits<double>::infinity()) strcpy(BUF, FORMAT1); else sprintf(BUF, FORMAT2, rms); }
 
+AUDFRET_EXP void makewmstr(map<unsigned int, string> &wmstr);
+
 BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 {
-	int res(0);
 	CShowvarDlg *cvDlg;
+	static map<unsigned int, string> wmstr;
+
 	bool alreadymade(false);
 	for (vector<CWndDlg*>::iterator it=cellviewdlg.begin(); it!=cellviewdlg.end(); it++)
 	{
 		if ( (*it)->hDlg == hDlg) {	cvDlg = (CShowvarDlg *)*it; alreadymade=true; 	break;}
 	}
 	if (!alreadymade) cvDlg = &mShowDlg;
-	if (umsg==WM_COMMAND)
-		res++;
+
+	//char msgbuf[32];
+	//bool cond = umsg!= WM_NCMOUSEMOVE && umsg!= WM_MOUSEMOVE && umsg!= WM_TIMER && umsg!= WM_PAINT;
+	//if(wmstr[umsg].size()>0) strcpy(msgbuf,wmstr[umsg].c_str()); else sprintf(msgbuf, "0x%04x", umsg);
+	//if (cond)
+	//	fp=fopen("showvarlog.txt","at"), fprintf(fp,"umsg=%s\n", msgbuf),fclose(fp);
+
+	//if (umsg==WM_INITDIALOG)
+	//	makewmstr(wmstr);
 	switch (umsg)
 	{
 	case WM_LBUTTONDOWN:
 	case WM_MBUTTONDOWN:
 	case WM_RBUTTONDOWN:
 	case WM_ACTIVATE:
+		SetForegroundWindow (hDlg);
 		if (cvDlg->changed) 
 			cvDlg->FillupShowVar();
 		break;
@@ -130,18 +141,19 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
 	CWndDlg::OnInitDialog(hwndFocus, lParam);
 
+	RECT rtDlg;
 	char buf[64];
+	mShowDlg.GetWindowRect(&rtDlg);
 	if ((int)hwndFocus==CELLVIEW)
 	{
 		::DestroyWindow(GetDlgItem(IDC_REFRESH));
 		::DestroyWindow(GetDlgItem(IDC_SETPATH));
 		::DestroyWindow(GetDlgItem(IDC_STATIC_FS));
 		::DestroyWindow(GetDlgItem(IDC_FS));
-		RECT rt;
-		mShowDlg.GetWindowRect(&rt);
-		int cx= (rt.right-rt.left)*3/5;
-		int cy = (rt.bottom-rt.top)*2/3;
-		MoveWindow((rt.left+rt.right)/2, (rt.bottom+rt.top*2)/3, cx, cy, TRUE);
+
+		int cx = (rtDlg.right-rtDlg.left)*3/5;
+		int cy = (rtDlg.bottom-rtDlg.top)*2/3;
+		MoveWindow((rtDlg.left+rtDlg.right)/2, (rtDlg.bottom+rtDlg.top*2)/3, cx, cy, TRUE);
 		sprintf(buf,"%s (cell)", (char*)lParam);
 		SetWindowText(buf);
 		::MoveWindow(GetDlgItem(IDC_STATIC_AUDIO), 7, 0, 200, 18, NULL);
@@ -152,6 +164,7 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	SendDlgItemMessage(IDC_REFRESH,BM_SETIMAGE, (WPARAM)IMAGE_BITMAP,
 		(LPARAM)LoadImage(hInst,MAKEINTRESOURCE(IDB_BTM_REFRESH),IMAGE_BITMAP,30,30,LR_DEFAULTSIZE));
 
+	lvInit();
 	return TRUE;
 }
 
@@ -202,13 +215,11 @@ void CShowvarDlg::OnSysCommand(UINT cmd, int x, int y)
 	// processing WM_SYSCOMMAND should return 0. How is this done?
 	// just add (msg) == WM_SYSCOMMAND	in SetDlgMsgResult in message cracker
 	HINSTANCE hInst;
-	char errstr[256];
 	switch(cmd)
 	{
 	case ID_HELP_SYSMENU:
 		hInst=GetModuleHandle(NULL);
 		DialogBoxParam (hInst, MAKEINTRESOURCE(IDD_ABOUT), GetConsoleWindow(), (DLGPROC)AboutDlg, (LPARAM)hInst);
-		GetLastErrorStr(errstr);
 		break;
 	}
 }
@@ -332,6 +343,7 @@ void CShowvarDlg::lvInit()
 	LvCol.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM;
 	hList1 = GetDlgItem(IDC_LIST1);
 	hList2 = GetDlgItem(IDC_LIST2);
+	if (!hList1) MessageBox("lvInit");
 	::SendMessage(hList1,LVM_SETEXTENDEDLISTVIEWSTYLE,0,LVS_EX_FULLROWSELECT);
 	::SendMessage(hList2,LVM_SETEXTENDEDLISTVIEWSTYLE,0,LVS_EX_FULLROWSELECT);
 
@@ -575,6 +587,7 @@ void SetInsertLV(int type, HWND h1, HWND h2, UINT msg, LPARAM lParam)
 
 void CShowvarDlg::FillupShowVar(CSignals *cell)
 {
+	int res;
 	changed=false;
 	HWND h, hList;
 	HINSTANCE hModule = GetModuleHandle(NULL);
@@ -600,7 +613,8 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		LvCol.pszText=buf;
 		if (k==0 && cell!=NULL) strcpy(buf,"id");
 		else		LoadString(hModule, IDS_STRING105+k, buf, sizeof(buf));
-		SendDlgItemMessage(IDC_LIST1, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+		res = (int)SendDlgItemMessage(IDC_LIST1, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+//		fp=fopen("showvarlog.txt","at"), fprintf(fp,"k=%d:buf=%s\n", k, buf),fclose(fp);
 	}
 	int width2[]={60, 45, 50, 300, 40, 60,200,};
 	if (cell!=NULL) {width2[0] = 30; width2[2] = 45;} // narrower width for index and length with cell view
@@ -610,7 +624,8 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		LvCol.pszText=buf;
 		if (k==0 && cell!=NULL) strcpy(buf,"id");
 		else		LoadString(hModule, IDS_STRING101+k, buf, sizeof(buf));
-		SendDlgItemMessage(IDC_LIST2, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+		res = (int)SendDlgItemMessage(IDC_LIST2, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+//		fp=fopen("showvarlog.txt","at"), fprintf(fp,"k2=%d:buf=%s\n", k, buf),fclose(fp);
 	}
 	CAstSigEnv *pe;
 	if (cell==NULL) // if it is main work space, grab it from global main

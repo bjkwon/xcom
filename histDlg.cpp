@@ -44,7 +44,11 @@ BOOL CHistDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	char buf[256];
 	DWORD dw = sizeof(buf);
 	GetComputerName(buf, &dw);
+<<<<<<< HEAD
 	sprintf(mHistDlg.logfilename, "%s%s%s_%s.log", AppPath, AppName, HISTORY_FILENAME, buf);
+=======
+	sprintf(logfilename, "%s%s%s_%s.log", AppPath, AppName, HISTORY_FILENAME, buf);
+>>>>>>> origin/master
 
 	vector<string> lines;
 	FILE *fp = fopen(logfilename, "rt");

@@ -32,6 +32,7 @@ BOOL AboutDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 
 AUDFRET_EXP void makewmstr(map<unsigned int, string> &wmstr);
 
+<<<<<<< HEAD
 LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 {
 	static	char varname[256];
@@ -90,6 +91,8 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 	return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
+=======
+>>>>>>> origin/master
 BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 {
 	CShowvarDlg *cvDlg;

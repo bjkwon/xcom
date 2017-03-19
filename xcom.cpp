@@ -124,6 +124,10 @@ unsigned int WINAPI histThread (PVOID var)
 {
 	mHistDlg.hDlg = CreateDialog (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_HISTORY), GetConsoleWindow(), (DLGPROC)historyDlg);
 	if (mHistDlg.hDlg==NULL) {MessageBox(NULL, "History Dlgbox creation failed.","AUXLAB",0); return 0;}
+<<<<<<< HEAD
+=======
+//	mHistDlg.OnInitDialog(NULL, (LPARAM)var);
+>>>>>>> origin/master
 	RECT rc, rc2;
 	int res = GetWindowRect(GetConsoleWindow(), &rc);
 	rc2 = rc;
@@ -160,6 +164,11 @@ unsigned int WINAPI histThread (PVOID var)
 unsigned int WINAPI showvarThread (PVOID var) // Thread for variable show
 {
 	HINSTANCE hModule = GetModuleHandle(NULL);
+<<<<<<< HEAD
+=======
+	//FILE *fpp=fopen("showvarlog.txt","wt");
+	//fclose(fpp);
+>>>>>>> origin/master
 
 	mShowDlg.hDlg = CreateDialog (hModule, MAKEINTRESOURCE(IDD_SHOWVAR), GetConsoleWindow(), (DLGPROC)showvarDlg);
 	mShowDlg.hList1 = GetDlgItem(mShowDlg.hDlg , IDC_LIST1);
@@ -702,6 +711,12 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	int fs;
 	char fullmoduleName[MAX_PATH], moduleName[MAX_PATH], AppPath[MAX_PATH];
  	char drive[16], dir[256], ext[8], fname[MAX_PATH], buffer[MAX_PATH], buffer2[MAX_PATH];
+<<<<<<< HEAD
+=======
+
+	//FILE *fpp=fopen("msglog.txt","wt");
+	//fclose(fpp);
+>>>>>>> origin/master
 
 	 _set_output_format(_TWO_DIGIT_EXPONENT);
 
@@ -732,11 +747,20 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	SetConsoleTitle(buf);
 	RECT rt;
 	GetWindowRect(hr, &rt);
+<<<<<<< HEAD
 	DWORD dw = sizeof(buf);
 	GetComputerName(buf, &dw);
 	sprintf(iniFile, "%s%s_%s.ini", AppPath, fname, buf);
 	res = readINI(iniFile, estr, fs, block, udfpath);
 	main.Reset(fs,""); //	main.Sig.Reset(fs); is wrong...
+=======
+	dw = sizeof(buf);
+	GetComputerName(buf, &dw);
+	sprintf(iniFile, "%s%s_%s.ini", AppPath, fname, buf);
+	res = readINI(iniFile, estr, fs, block, udfpath);
+//	main.Sig.Reset(fs); // This is not how to do it... see below 
+	main.Reset(fs,"");
+>>>>>>> origin/master
 	addp = AppPath;
 	if (strlen(udfpath)>0 && udfpath[0]!=';') addp += ';';	
 	addp += udfpath;

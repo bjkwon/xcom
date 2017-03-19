@@ -3,11 +3,7 @@
 
 #define HISTORY_FILENAME	"_history"
 
-<<<<<<< HEAD
 #define LOGHISTORY(MSG) { FILE* __fp_ = fopen(mHistDlg.logfilename,"at"); if (__fp_) fprintf(__fp_,"%s\n", (MSG)); else MessageBox(NULL, "null fp", "", 0); fclose(__fp_); } 
-=======
-#define LOGHISTORY(MSG) { FILE* __fp_=fopen(mHistDlg.logfilename,"at"); fprintf(__fp_,"%s\n", (MSG)); fclose(__fp_); }
->>>>>>> origin/master
 
 #define PRINTF_WIN(MSG) WriteFile(hStdout, (MSG), strlen((MSG)), &dw, NULL);
 

@@ -32,7 +32,6 @@ BOOL AboutDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 
 AUDFRET_EXP void makewmstr(map<unsigned int, string> &wmstr);
 
-<<<<<<< HEAD
 LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 {
 	static	char varname[256];
@@ -91,8 +90,6 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 	return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
-=======
->>>>>>> origin/master
 BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 {
 	CShowvarDlg *cvDlg;
@@ -549,10 +546,7 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 					{
 						ListView_GetItemText(lvnkeydown->hdr.hwndFrom, k, 0, buf, 256);
 						player.push_back(buf);
-
-						res = GetSig(string(buf)).PlayArray(0, WM_APP+100, hDlg, &playbackblock, errstr);
-						if (res!=0)
-							MessageBox (errstr, itoa(res, buf, 10));
+						GetSig(string(buf)).PlayArray(0, WM_APP+100, hDlg, &playbackblock, errstr);
 					}
 				}
 				break;

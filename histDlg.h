@@ -11,6 +11,7 @@ public:
 	HWND hList;
 	LVCOLUMN LvCol;
 	LVITEM LvItem;
+	char logfilename[256];
 
 	HFONT eFont;
 

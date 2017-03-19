@@ -1,8 +1,8 @@
+#include "graffy.h" // this should come before the rest because of wxx820
 #include <process.h>
 #include "showvar.h"
 #include "resource1.h"
 #include "audfret.h"
-#include "graffy.h"
 
 extern CWndDlg wnd;
 extern CShowvarDlg mShowDlg;
@@ -30,24 +30,93 @@ BOOL AboutDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 
 #define RMSDB(BUF,FORMAT1,FORMAT2,X) { double rms;	if ((rms=X)==-1.*std::numeric_limits<double>::infinity()) strcpy(BUF, FORMAT1); else sprintf(BUF, FORMAT2, rms); }
 
+AUDFRET_EXP void makewmstr(map<unsigned int, string> &wmstr);
+
+LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
+{
+	static	char varname[256];
+	switch(code)
+	{
+	case HC_ACTION:
+		{
+			CSignals gcf;
+			MSG *pmsg = (MSG*)lParam;
+			if ((pmsg->message>=WM_NCLBUTTONDOWN && pmsg->message<=WM_NCMBUTTONDBLCLK) || ((pmsg->message>=WM_LBUTTONDOWN && pmsg->message<=WM_MBUTTONDBLCLK)) )
+			{
+				if (GetFigID(pmsg->hwnd, gcf) || GetFigID(GetParent(pmsg->hwnd), gcf))
+				{
+					main.SetTag("gcf", gcf);
+					mShowDlg.FillupShowVar();
+				}
+			
+			}
+			else if (pmsg->message==WM__VAR_CHANGED)
+			{
+				CSignals *tp = GetSig((char*)pmsg->wParam);
+				if (tp && (tp->GetType()==CSIG_AUDIO || tp->GetType()==CSIG_VECTOR))
+				{
+					HANDLE fig = FindFigure((char*)pmsg->wParam);
+					CFigure *cfig = static_cast<CFigure *>(fig);
+					HANDLE ax = cfig->ax.front();
+					while(cfig->ax.front()->m_ln.size()>0)	
+						deleteObj(cfig->ax.front()->m_ln.front());
+
+					if (main.Sig.GetType()==CSIG_VECTOR)
+						PlotCSignals(ax, main.Sig, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
+					else
+						PlotCSignals(ax, main.Sig, 0xff0000);
+					if (main.Sig.next)
+						PlotCSignals(ax, *main.Sig.next, RGB(200,0,50));
+					main.SetTag("gcf", *tp);
+					mShowDlg.FillupShowVar();
+				}
+				else // if the variable is no longer unavable, audio or vector, exit the thread (and delete the fig window)
+					PostThreadMessage (GetCurrentThreadId(), WM_QUIT, 0, 0);
+				break;
+			}
+			else if (pmsg->message==WM_QUIT)
+			{
+				CSignals var;
+				int res  = GetFigID(pmsg->hwnd, var);
+				HWND hp=GetParent(pmsg->hwnd);
+				strcpy(varname, var.string().c_str());
+				PostMessage(hp, WM__PLOTDLG_DESTROYED, (WPARAM)varname, 0);
+			}
+
+
+		}
+		break;
+	}
+	return CallNextHookEx(NULL, code, wParam, lParam);
+}
+
 BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 {
-	int res(0);
 	CShowvarDlg *cvDlg;
+	static map<unsigned int, string> wmstr;
+
 	bool alreadymade(false);
 	for (vector<CWndDlg*>::iterator it=cellviewdlg.begin(); it!=cellviewdlg.end(); it++)
 	{
 		if ( (*it)->hDlg == hDlg) {	cvDlg = (CShowvarDlg *)*it; alreadymade=true; 	break;}
 	}
 	if (!alreadymade) cvDlg = &mShowDlg;
-	if (umsg==WM_COMMAND)
-		res++;
+
+	//char msgbuf[32];
+	//bool cond = umsg!= WM_NCMOUSEMOVE && umsg!= WM_MOUSEMOVE && umsg!= WM_TIMER && umsg!= WM_PAINT;
+	//if(wmstr[umsg].size()>0) strcpy(msgbuf,wmstr[umsg].c_str()); else sprintf(msgbuf, "0x%04x", umsg);
+	//if (cond)
+	//	fp=fopen("showvarlog.txt","at"), fprintf(fp,"umsg=%s\n", msgbuf),fclose(fp);
+
+	//if (umsg==WM_INITDIALOG)
+	//	makewmstr(wmstr);
 	switch (umsg)
 	{
 	case WM_LBUTTONDOWN:
 	case WM_MBUTTONDOWN:
 	case WM_RBUTTONDOWN:
 	case WM_ACTIVATE:
+		SetForegroundWindow (hDlg);
 		if (cvDlg->changed) 
 			cvDlg->FillupShowVar();
 		break;
@@ -61,7 +130,9 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 	chHANDLE_DLGMSG (hDlg, WM__SOUND_EVENT, cvDlg->OnSoundEvent);
 
 	case WM__PLOTDLG_CREATED: // Posted by plotThread when the plot dlg is displayed.
-		cvDlg->OnPlotDlgCreated((char*)wParam, (DWORD)lParam);
+		//wParam: var name. If NULL, that means generic figure window, not attached to a variable
+		//lParam: pointer to the GRAFWNDDLGSTRUCT structure
+		cvDlg->OnPlotDlgCreated((char*)wParam, (GRAFWNDDLGSTRUCT*)lParam);
 		break;
 
 	case WM__PLOTDLG_DESTROYED: // Posted by plotThread when the plot dlg is displayed.
@@ -85,7 +156,7 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 	case WM_GCF_UPDATED:
 	{
 		CSignals gcf;
-		GetFigID((HWND)wParam, gcf);
+		GetFigID((HANDLE)wParam, gcf);
 		main.SetTag("gcf", gcf);
 		cvDlg->OnCommand(IDC_REFRESH, NULL, 0);
 		break;
@@ -113,12 +184,22 @@ CShowvarDlg::~CShowvarDlg(void)
 void CShowvarDlg::OnVarChanged(char *varname)
 {
 	if (strlen(varname) && plotDlgThread.find(varname) != plotDlgThread.end())
-		PostThreadMessage(plotDlgThread[varname], WM__VAR_CHANGED, 0, 0);
+		PostThreadMessage(plotDlgThread[varname], WM__VAR_CHANGED, (WPARAM)varname, 0);
 }
 
-void CShowvarDlg::OnPlotDlgCreated(char *varname, DWORD id)
+void CShowvarDlg::OnPlotDlgCreated(char *varname, GRAFWNDDLGSTRUCT *pin)
 {
-	plotDlgThread[varname] = id;
+	CSignals gcf;
+	GetFigID(pin->fig, gcf);
+	main.SetTag("gcf", gcf);
+	if (strlen(varname)>0)
+		FillupShowVar();
+	HHOOK hh = SetWindowsHookEx (WH_GETMESSAGE, HookProc, NULL, pin->threadPlot);
+
+	// this line is problematic... If varname is empty, new plotDlgThread replaces the old one.
+	// maybe this is OK if the use of plotDlgThread is limited to cases of non-empty varname 
+	// 02/20/2017 bjk
+	plotDlgThread[varname] = pin->threadPlot; 
 }
 
 void CShowvarDlg::OnPlotDlgDestroyed(char *varname)
@@ -130,18 +211,19 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
 	CWndDlg::OnInitDialog(hwndFocus, lParam);
 
+	RECT rtDlg;
 	char buf[64];
+	mShowDlg.GetWindowRect(&rtDlg);
 	if ((int)hwndFocus==CELLVIEW)
 	{
 		::DestroyWindow(GetDlgItem(IDC_REFRESH));
 		::DestroyWindow(GetDlgItem(IDC_SETPATH));
 		::DestroyWindow(GetDlgItem(IDC_STATIC_FS));
 		::DestroyWindow(GetDlgItem(IDC_FS));
-		RECT rt;
-		mShowDlg.GetWindowRect(&rt);
-		int cx= (rt.right-rt.left)*3/5;
-		int cy = (rt.bottom-rt.top)*2/3;
-		MoveWindow((rt.left+rt.right)/2, (rt.bottom+rt.top*2)/3, cx, cy, TRUE);
+
+		int cx = (rtDlg.right-rtDlg.left)*3/5;
+		int cy = (rtDlg.bottom-rtDlg.top)*2/3;
+		MoveWindow((rtDlg.left+rtDlg.right)/2, (rtDlg.bottom+rtDlg.top*2)/3, cx, cy, TRUE);
 		sprintf(buf,"%s (cell)", (char*)lParam);
 		SetWindowText(buf);
 		::MoveWindow(GetDlgItem(IDC_STATIC_AUDIO), 7, 0, 200, 18, NULL);
@@ -152,6 +234,7 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	SendDlgItemMessage(IDC_REFRESH,BM_SETIMAGE, (WPARAM)IMAGE_BITMAP,
 		(LPARAM)LoadImage(hInst,MAKEINTRESOURCE(IDB_BTM_REFRESH),IMAGE_BITMAP,30,30,LR_DEFAULTSIZE));
 
+	lvInit();
 	return TRUE;
 }
 
@@ -202,13 +285,11 @@ void CShowvarDlg::OnSysCommand(UINT cmd, int x, int y)
 	// processing WM_SYSCOMMAND should return 0. How is this done?
 	// just add (msg) == WM_SYSCOMMAND	in SetDlgMsgResult in message cracker
 	HINSTANCE hInst;
-	char errstr[256];
 	switch(cmd)
 	{
 	case ID_HELP_SYSMENU:
 		hInst=GetModuleHandle(NULL);
 		DialogBoxParam (hInst, MAKEINTRESOURCE(IDD_ABOUT), GetConsoleWindow(), (DLGPROC)AboutDlg, (LPARAM)hInst);
-		GetLastErrorStr(errstr);
 		break;
 	}
 }
@@ -221,8 +302,8 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 	vector<HANDLE> figs;
 	char *longbuffer;
 	char errstr[256];
-	if (changed) 
-		FillupShowVar(); 
+//	if (changed) 
+//		FillupShowVar(); 
 	
 	switch(idc)
 	{
@@ -332,6 +413,7 @@ void CShowvarDlg::lvInit()
 	LvCol.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM;
 	hList1 = GetDlgItem(IDC_LIST1);
 	hList2 = GetDlgItem(IDC_LIST2);
+	if (!hList1) MessageBox("lvInit");
 	::SendMessage(hList1,LVM_SETEXTENDEDLISTVIEWSTYLE,0,LVS_EX_FULLROWSELECT);
 	::SendMessage(hList2,LVM_SETEXTENDEDLISTVIEWSTYLE,0,LVS_EX_FULLROWSELECT);
 
@@ -352,6 +434,8 @@ void CShowvarDlg::lvInit()
 	LoadString (hInst, IDS_HELP_SHOWVARLIST2, buf, sizeof(buf));
 	CreateTT(hInst, hList2, rt, buf, 300);
 }
+
+
 
 void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 {
@@ -377,6 +461,8 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	int type, id;
 	vector<string> player;
 	vector<int> selectState;// This is the placeholder for select state used exclusively for mShowDlg, to use to get non-consecutively selected rows. Probably there are easier features already available if I was using .NET or C# 7/11/2016
+
+	static GRAFWNDDLGSTRUCT in;
 
 	switch(code)
 	{
@@ -409,6 +495,7 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 		}
 		case CSIG_VECTOR:
 		case CSIG_STRING:
+		case CSIG_COMPLEX:
 			if (!alreadymade)
 			{
 				cvdlg = new CVectorsheetDlg;
@@ -459,7 +546,10 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 					{
 						ListView_GetItemText(lvnkeydown->hdr.hwndFrom, k, 0, buf, 256);
 						player.push_back(buf);
-						GetSig(string(buf)).PlayArray(0, WM_APP+100, hDlg, &playbackblock, errstr);
+
+						res = GetSig(string(buf)).PlayArray(0, WM_APP+100, hDlg, &playbackblock, errstr);
+						if (res!=0)
+							MessageBox (errstr, itoa(res, buf, 10));
 					}
 				}
 				break;
@@ -469,11 +559,20 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 				if (!hobj)
 				{
 					main.Sig = GetSig(strbuf);
-					if (main.Sig.GetType()==CSIG_AUDIO || main.Sig.GetType()==CSIG_VECTOR)
+					if ( (main.Sig.GetType()==CSIG_AUDIO || main.Sig.GetType()==CSIG_VECTOR) && main.Sig.nSamples>0)
 					{
-						messenger.hBase = hDlg;
-						strcpy(messenger.varname, buf);
-						_beginthread (plotThread, 0, (void*)&messenger);
+						CSignals gcf;
+						CRect rt(0, 0, 500, 310);
+						HANDLE fig = OpenGraffy(rt, buf, GetCurrentThreadId(), hDlg, in);
+						HANDLE ax = AddAxis (fig, .08, .18, .86, .72);
+						CAxis *cax = static_cast<CAxis *>(ax);
+						if (main.Sig.GetType()==CSIG_VECTOR)
+							PlotCSignals(ax, main.Sig, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
+						else
+							PlotCSignals(ax, main.Sig, 0xff0000);
+						if (main.Sig.next)
+							PlotCSignals(ax, *main.Sig.next, RGB(200,0,50));
+						PostMessage(WM__PLOTDLG_CREATED, (WPARAM)buf, (LPARAM)&in);
 					}
 				}
 				else
@@ -573,8 +672,10 @@ void SetInsertLV(int type, HWND h1, HWND h2, UINT msg, LPARAM lParam)
 		SendMessage(h2, msg, 0, lParam);
 }
 
+
 void CShowvarDlg::FillupShowVar(CSignals *cell)
 {
+	int res;
 	changed=false;
 	HWND h, hList;
 	HINSTANCE hModule = GetModuleHandle(NULL);
@@ -600,7 +701,8 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		LvCol.pszText=buf;
 		if (k==0 && cell!=NULL) strcpy(buf,"id");
 		else		LoadString(hModule, IDS_STRING105+k, buf, sizeof(buf));
-		SendDlgItemMessage(IDC_LIST1, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+		res = (int)SendDlgItemMessage(IDC_LIST1, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+//		fp=fopen("showvarlog.txt","at"), fprintf(fp,"k=%d:buf=%s\n", k, buf),fclose(fp);
 	}
 	int width2[]={60, 45, 50, 300, 40, 60,200,};
 	if (cell!=NULL) {width2[0] = 30; width2[2] = 45;} // narrower width for index and length with cell view
@@ -610,7 +712,8 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		LvCol.pszText=buf;
 		if (k==0 && cell!=NULL) strcpy(buf,"id");
 		else		LoadString(hModule, IDS_STRING101+k, buf, sizeof(buf));
-		SendDlgItemMessage(IDC_LIST2, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+		res = (int)SendDlgItemMessage(IDC_LIST2, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+//		fp=fopen("showvarlog.txt","at"), fprintf(fp,"k2=%d:buf=%s\n", k, buf),fclose(fp);
 	}
 	CAstSigEnv *pe;
 	if (cell==NULL) // if it is main work space, grab it from global main
@@ -625,13 +728,22 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 			pe->Tags[buf] = cell->cell[u-1];
 		}
 	}
+	//size_t ss = pe->Tags.size();
+	//itoa(ss,buf,10);
+	//if (ss>0)
+	//{
+	//	MessageBox("size of main.Tags",buf);
+	//	FILE* ff=fopen("asdf","at");
+	//	fprintf(ff,"size of main.Tags=%d\n",ss);
+	//	fclose(ff);
+	//}
+
 	int xc(0);
 	int k(0); // k is for column
 	string out, arrout, lenout;
 	for (map<string, CSignals>::iterator what=pe->Tags.begin(); what!=pe->Tags.end(); what++)
 	{
 		CSignals tpp = what->second;
-		CSignals local(tpp);
 		LvItem.iSubItem=0; //First item (InsertITEM)
 		strcpy(buf,what->first.c_str()); 
 		LvItem.pszText=buf;
@@ -669,6 +781,10 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 			break;
 		case CSIG_CELL:
 			LvItem.pszText="cell";
+			break;
+		case CSIG_COMPLEX:
+			LvItem.pszText="complex";
+			break;
 		}
 		::SendMessage (hList, LVM_SETITEM, 0, (LPARAM)&LvItem);
 		LvItem.iSubItem=2; 
@@ -692,13 +808,14 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 			strcpy(buf, lenout.c_str());
 			break;
 		case CSIG_SCALAR:
-			strcpy(buf,"----");
+			strcpy(buf,"1");
 			break;
 		case CSIG_NULL:
 			strcpy(buf,"0");
 			break;
 		case CSIG_STRING:
 		case CSIG_VECTOR:
+		case CSIG_COMPLEX:
 			sprintf(buf, "%d", tpp.nSamples);
 			break;
 		case CSIG_CELL:
@@ -743,6 +860,20 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 			}
 			strcpy(buf, arrout.c_str());
 			buf[strlen(buf-1)-2] = ']';
+			LvItem.pszText=buf;
+			break;
+		case CSIG_COMPLEX:
+			if (tpp.nSamples==1)
+				sprintf(buf,"%g+i%g", tpp.buf[0], tpp.buf[1]);
+			else
+			{
+				arrout="[";
+				for (int k=0; k<min(tpp.nSamples,10); k++)
+				{	sprintf(buf,"%g+i%g", tpp.buf[2*k], tpp.buf[2*k+1]); arrout += buf;		}
+				if (tpp.nSamples>10) arrout += "...";
+				strcpy(buf, arrout.c_str());
+				buf[strlen(buf-1)-2] = ']';
+			}
 			LvItem.pszText=buf;
 			break;
 		case CSIG_SCALAR:

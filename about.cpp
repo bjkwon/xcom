@@ -112,6 +112,7 @@ Gave up and used the subclassed static control from SSpoke. 7/7/2016 bjk
    Source: http://stackoverflow.com/questions/7784975/c-win32-add-a-hyperlink-to-a-dialog
    Author: SSpoke 
    Slightly edited by bjkwon to compatible with WIN64  7/7/2016
+   Don't forget to change LONG to LONG_PTR 10/8/2016 
 */
 
 /* Start of HyperLink URL */
@@ -121,7 +122,7 @@ Gave up and used the subclassed static control from SSpoke. 7/7/2016 bjk
 #define PROP_UNDERLINE_FONT     TEXT("_Hyperlink_Underline_Font_")
 LRESULT CALLBACK _HyperlinkParentProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK _HyperlinkProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
-static void CreateHyperLink(HWND hwndControl);
+//static void CreateHyperLink(HWND hwndControl);
 /* End of HyperLink URL */
 
 static void CreateHyperLink(HWND hwndControl)
@@ -134,7 +135,7 @@ static void CreateHyperLink(HWND hwndControl)
         if (pfnOrigProc != _HyperlinkParentProc)
         {
             SetProp(hwndParent, PROP_ORIGINAL_PROC, (HANDLE)pfnOrigProc);
-            SetWindowLongPtr(hwndParent, GWLP_WNDPROC, (LONG)(WNDPROC)_HyperlinkParentProc);
+            SetWindowLongPtr(hwndParent, GWLP_WNDPROC, (LONG_PTR)(WNDPROC)_HyperlinkParentProc);
         }
     }
 
@@ -145,7 +146,7 @@ static void CreateHyperLink(HWND hwndControl)
     // Subclass the existing control.
     WNDPROC pfnOrigProc = (WNDPROC)GetWindowLongPtr(hwndControl, GWLP_WNDPROC);
     SetProp(hwndControl, PROP_ORIGINAL_PROC, (HANDLE)pfnOrigProc);
-    SetWindowLongPtr(hwndControl, GWLP_WNDPROC, (LONG)(WNDPROC)_HyperlinkProc);
+    SetWindowLongPtr(hwndControl, GWLP_WNDPROC, (LONG_PTR)(WNDPROC)_HyperlinkProc);
 
     // Create an updated font by adding an underline.
     HFONT hOrigFont = (HFONT)SendMessage(hwndControl, WM_GETFONT, 0, 0);
@@ -185,7 +186,7 @@ LRESULT CALLBACK _HyperlinkParentProc(HWND hwnd, UINT message, WPARAM wParam, LP
     }
     case WM_DESTROY:
     {
-        SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG)pfnOrigProc);
+        SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)pfnOrigProc);
         RemoveProp(hwnd, PROP_ORIGINAL_PROC);
         break;
     }
@@ -201,7 +202,7 @@ LRESULT CALLBACK _HyperlinkProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
     {
     case WM_DESTROY:
     {
-        SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG)pfnOrigProc);
+        SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)pfnOrigProc);
         RemoveProp(hwnd, PROP_ORIGINAL_PROC);
 
         HFONT hOrigFont = (HFONT)GetProp(hwnd, PROP_ORIGINAL_FONT);

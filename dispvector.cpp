@@ -1,5 +1,4 @@
-#include "wincore.h"
-#include "winutils.h"
+#include "wxx_wincore.h" // Win32++ 8.2. This must be placed prior to <windows.h> to avoid including winsock.h
 
 #include <process.h>
 #include "showvar.h"
@@ -112,13 +111,13 @@ void CVectorsheetDlg::FillupVector(CSignals &sig)
 		SendDlgItemMessage(IDC_LISTVECTOR,LVM_INSERTITEM,0,(LPARAM)&LvItem);
 	}
 	bool ch(sig.GetType()==CSIG_STRING);
-	bool cmplx(sig.next != NULL);
+	bool cmplx(sig.IsComplex());
 	for(int k = sig.nSamples-1; k>=0; k--)
 	{
 		LvItem.iItem=k; 
 		LvItem.iSubItem=1; 
 		if (ch) sprintf(buf,"%c (%u)", (char)sig.strbuf[k], (unsigned char)sig.strbuf[k]);
-		else if (cmplx) sprintf(buf,"%g %+g i", sig.buf[k], sig.next->buf[k]);
+		else if (cmplx) sprintf(buf,"%g %+g * i", sig.buf[2*k], sig.buf[2*k+1]);
 		else sprintf(buf,"%g", sig.buf[k]);
 		LvItem.pszText=buf;
 		SendDlgItemMessage(IDC_LISTVECTOR,LVM_SETITEM,0,(LPARAM)&LvItem);

@@ -21,7 +21,7 @@ BOOL CtrlHandler( DWORD fdwCtrlType )
   switch( fdwCtrlType ) 
   { 
     // This works properly only when ReadConsole or ReadConsoleInput or any other low level functions are used. Not for highlevel such as getchar
-    case CTRL_C_EVENT: 
+    case CTRL_C_EVENT:
 //      printf( "Ctrl-C pressed. Exiting...\n" );
 // 	  LOGHISTORY("//\t<<CTRL-C Pressed>>")
       return( TRUE );

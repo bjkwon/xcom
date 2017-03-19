@@ -1,9 +1,9 @@
+#include "wxx_wincore.h" // Win32++ 8.2. This must be placed prior to <windows.h> to avoid including winsock.h
 #include "histDlg.h"
 #include "resource1.h"
 #include "audfret.h"
 
 extern CHistDlg mHistDlg;
-extern CWndDlg wndHistory;
 
 void computeandshow(char *AppPath, int code, char *buf);
 HWND CreateTT(HINSTANCE hInst, HWND hParent, RECT rt, char *string, int maxwidth=400);
@@ -12,9 +12,10 @@ BOOL CALLBACK historyDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 {
 	switch (umsg)
 	{
-	chHANDLE_DLGMSG (hDlg, WM_INITDIALOG, wndHistory.OnInitDialog);
+	chHANDLE_DLGMSG (hDlg, WM_INITDIALOG, mHistDlg.OnInitDialog);
 	chHANDLE_DLGMSG (hDlg, WM_SIZE, mHistDlg.OnSize);
 	chHANDLE_DLGMSG (hDlg, WM_CLOSE, mHistDlg.OnClose);
+
 	chHANDLE_DLGMSG (hDlg, WM_SHOWWINDOW, mHistDlg.OnShowWindow);
 	chHANDLE_DLGMSG (hDlg, WM_COMMAND, mHistDlg.OnCommand);
 	case WM_NOTIFY:
@@ -38,43 +39,37 @@ CHistDlg::~CHistDlg(void)
 
 BOOL CHistDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
+	CWndDlg::OnInitDialog(hwndFocus, lParam);
 	lvInit();
-
-	char fname[256];
-	strcpy(AppPath, (char*)lParam);
-
-	_makepath(fname, NULL, (char*)lParam, HISTORY_FILENAME, NULL);
+	char buf[256];
+	DWORD dw = sizeof(buf);
+	GetComputerName(buf, &dw);
+	sprintf(mHistDlg.logfilename, "%s%s%s_%s.log", AppPath, AppName, HISTORY_FILENAME, buf);
 
 	vector<string> lines;
-	FILE *fp = fopen(fname, "rt");
+	FILE *fp = fopen(logfilename, "rt");
 	if (fp!=NULL)
 	{
 		fseek (fp, 0, SEEK_END);
 		int filesize=ftell(fp);
 		fseek (fp, 0, SEEK_SET);
 		char *buf = new char[filesize+1];
-		int res = fread(buf, 1, filesize, fp);
+		size_t res = fread(buf, 1, (size_t)filesize, fp);
 		buf[res]=0;
 		fclose(fp);
-		int res2 = str2vect(lines, buf, "\r\n");
+		size_t res2 = str2vect(lines, buf, "\r\n");
 		delete[] buf;
 		FillupHist(lines);
 	}
 	else
 	{
-		fp=fopen("hist_disappearing_track.txt","at");
-		fprintf(fp,"history file open error.\n");
-		fclose(fp);
+		// Keep the following 3 lines until I am sure that the initial screen anomaly is gone. 10/2/2016 bjk
+		//fp=fopen("hist_disappearing_track.txt","at");
+		//fprintf(fp,"history file open error.\n");
+		//fclose(fp);
 
 		FillupHist(lines);
 	}
-
-	//char buf[64];
-	//RECT rt;
-	//mShowDlg.GetWindowRect(&rt);
-	//MoveWindow((rt.left+rt.right)/2, (rt.bottom+rt.top*2)/3, (rt.right-rt.left)*3/5, (rt.bottom-rt.top)*2/3, TRUE);
-	//sprintf(buf,"{CELL} %s", (char*)lParam);
-	//SetWindowText(buf);
 	return TRUE;
 }
 

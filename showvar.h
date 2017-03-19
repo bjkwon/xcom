@@ -2,6 +2,7 @@
 #include <commctrl.h>  // includes the common control header
 #include "WndDlg0.h"
 #include "msgCrack.h"
+#include "graffy.h"
 #ifndef SIGPROC
 #include "sigproc.h"
 #endif
@@ -16,10 +17,6 @@ typedef struct {
 	HWND hBase;
 	char varname[256];
 } VARPLOT;
-
-#define WM__VAR_CHANGED			WM_APP+811
-#define WM__PLOTDLG_CREATED		WM_APP+823
-#define WM__PLOTDLG_DESTROYED	WM_APP+824
 
 class CVectorsheetDlg : public CWndDlg
 {
@@ -79,7 +76,7 @@ public:
 	void OnNotify(HWND hwnd, int idcc, LPARAM lParam);
 	LRESULT ProcessCustomDraw (NMHDR *lParam);
 	void OnSoundEvent(int index, int code);
-	void OnPlotDlgCreated(char *varname, DWORD id);
+	void OnPlotDlgCreated(char *varname, GRAFWNDDLGSTRUCT *pin);
 	void OnPlotDlgDestroyed(char *varname);
 	void OnVarChanged(char *varname);
 	void OnCloseFig(int figID);

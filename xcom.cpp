@@ -294,86 +294,94 @@ void showarray(int code, CAstSig *main, AstNode *node)
 	GRAFWNDDLGSTRUCT in;
 	string varname, out;
 	char buf[256], errstr[256];
-	switch(node->type)
-	{
-	case T_IF:
-	case T_WHILE:
-	case T_SWITCH:
-	case T_FOR:
-	case T_SIGMA:
-		break;
-	case T_ID: // noncell_variable or cellvar{index}
-	case NODE_CALL: // variable(index)
-		if (need2echo(node))
+	if (node)
+		switch(node->type)
 		{
-			tp = main->Sig;
-			main->SetTag("ans", tp);
-			out4console("ans =\n", &tp, out);
-		}
-		break;
-	case NODE_INITCELL: // cell definition
-		tp = main->Sig;
-		out4console(node->str, main->RetrieveTag(node->str), out);
-		mShowDlg.changed=true; 
-		mShowDlg.SendMessage(WM__VAR_CHANGED, (WPARAM)node->str);
-		break;
-	case NODE_BLOCK: // MULTIPLE statements.
-		{
-			string script(main->GetScript());
-			AstNode *p(node->child);
-			while (p && p->child)
+		case T_IF:
+		case T_WHILE:
+		case T_SWITCH:
+		case T_FOR:
+		case T_SIGMA:
+			break;
+		case T_ID: // noncell_variable or cellvar{index}
+			if (!node->child) // this means noncell_variable 
 			{
-				if (p->type==T_IF || p->type==T_WHILE || p->type==T_SWITCH || p->type==T_FOR || p->type==T_SIGMA )
-					showarray (ID_DEFAULT, main, p);
-				else if (p->str)
+				varname = node->str; varname += " =\n";
+				out4console(varname, &main->Sig, out);
+				// notice that this break is inside the bracket 
+				break; // That means.... if cellvar{index}, passing through
+			}
+		case NODE_CALL: // variable(index)
+			if (need2echo(node))
+			{
+				tp = main->Sig;
+				main->SetTag("ans", tp);
+				out4console("ans =\n", &tp, out);
+			}
+			break;
+		case NODE_INITCELL: // cell definition
+			tp = main->Sig;
+			out4console(node->str, main->RetrieveTag(node->str), out);
+			mShowDlg.changed=true; 
+			mShowDlg.SendMessage(WM__VAR_CHANGED, (WPARAM)node->str);
+			break;
+		case NODE_BLOCK: // MULTIPLE statements.
+			{
+				string script(main->GetScript());
+				AstNode *p(node->child);
+				while (p && p->child)
 				{
-					size_t found = script.find(';', p->column-1);
-					if ( (p->next && (int)found > p->next->column) || // ; found but outside the current node 
-						found==string::npos) // ; not found
+					if (p->type==T_IF || p->type==T_WHILE || p->type==T_SWITCH || p->type==T_FOR || p->type==T_SIGMA )
+						showarray (ID_DEFAULT, main, p);
+					else if (p->str)
 					{
-						// if p->type is NODE_CALL, p->str shows the name of function call (so don't call Eval)
-						if (p->type != NODE_CALL && !main->RetrieveTag(p->str))
-							main->Eval(p);
-						if (p->type == NODE_CALL)
+						size_t found = script.find(';', p->column-1);
+						if ( (p->next && (int)found > p->next->column) || // ; found but outside the current node 
+							found==string::npos) // ; not found
 						{
-							if (!p->next) // For function call, show only for the last one
+							// if p->type is NODE_CALL, p->str shows the name of function call (so don't call Eval)
+							if (p->type != NODE_CALL && !main->RetrieveTag(p->str))
+								main->Eval(p);
+							if (p->type == NODE_CALL)
+							{
+								if (!p->next) // For function call, show only for the last one
+									showarray (ID_DEFAULT, main, p);
+							}
+							else
 								showarray (ID_DEFAULT, main, p);
 						}
-						else
-							showarray (ID_DEFAULT, main, p);
 					}
+					p=p->next;
 				}
-				p=p->next;
 			}
-		}
-		break;
+			break;
 
-	default: // any statement
-		if (node->str)
-		{
-			map<string, CSignals>::iterator what;
-			what = main->pEnv->Tags.find(node->str);
-			if (what == main->pEnv->Tags.end())
-				tp = main->Sig;
-			else
+		default: // any statement
+			if (node->str)
 			{
-				tp = what->second;
-				if (tp.cell.size()>0) out4console(node->str, &tp, out);
+				map<string, CSignals>::iterator what;
+				what = main->pEnv->Tags.find(node->str);
+				if (what == main->pEnv->Tags.end())
+					tp = main->Sig;
 				else
 				{
-					varname = node->str; varname += " =\n";
-					out4console(varname, &tp, out);
+					tp = what->second;
+					if (tp.cell.size()>0) out4console(node->str, &tp, out);
+					else
+					{
+						varname = node->str; varname += " =\n";
+						out4console(varname, &tp, out);
+					}
 				}
 			}
+			else // Extraction. Expression, no variable
+			{
+				main->SetTag("ans", main->Sig);
+				out4console("ans =\n", &main->Sig, out);
+			}
+			break;
 		}
-		else // Extraction. Expression, no variable
-		{
-			main->SetTag("ans", main->Sig);
-			out4console("ans =\n", &main->Sig, out);
-		}
-		break;
-	}
-	printf("%s",out.c_str());
+	if (out.length()>0) printf("%s",out.c_str());
 
 	switch(code)
 	{
@@ -517,7 +525,11 @@ void computeandshow(char *AppPath, int code, char *buf)
 		fclose(fp);
 		break;
 	default:
-		if (strlen(buf)>0)
+		if (code==ID_STOP)
+		{
+			showarray(code, NULL, NULL);
+		}
+		else if (strlen(buf)>0)
 		{
 		try {
 			main.SetNewScript(buf,&node);

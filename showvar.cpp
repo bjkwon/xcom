@@ -48,7 +48,6 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 					main.SetTag("gcf", gcf);
 					mShowDlg.FillupShowVar();
 				}
-			
 			}
 			else if (pmsg->message==WM__VAR_CHANGED)
 			{
@@ -58,6 +57,9 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 					HANDLE fig = FindFigure((char*)pmsg->wParam);
 					CFigure *cfig = static_cast<CFigure *>(fig);
 					HANDLE ax = cfig->ax.front();
+					CAxis *cax = static_cast<CAxis *>(ax);
+					double xlim[2];
+					memcpy(xlim,cax->xlim, 2*sizeof(cax->xlim[0]));
 					while(cfig->ax.front()->m_ln.size()>0)	
 						deleteObj(cfig->ax.front()->m_ln.front());
 
@@ -67,6 +69,8 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 						PlotCSignals(ax, main.Sig, 0xff0000);
 					if (main.Sig.next)
 						PlotCSignals(ax, *main.Sig.next, RGB(200,0,50));
+					if (cax->xlim[0]<xlim[0] && cax->xlim[1]>xlim[1])
+						SetRange(ax, 'x', xlim[0], xlim[1]); 
 					main.SetTag("gcf", *tp);
 					mShowDlg.FillupShowVar();
 				}

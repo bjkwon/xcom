@@ -69,7 +69,7 @@
 #define  T_NUMBER 284
 #define  T_STRING 285
 #define  T_ID 286
-#define  T_DUR 287,
+#define  T_DUR 287
 #define  T_LENGTH 288
 #define  T_NEGATIVE 289
 #define  T_POSITIVE 290

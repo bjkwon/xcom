@@ -62,7 +62,6 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 					memcpy(xlim,cax->xlim, 2*sizeof(cax->xlim[0]));
 					while(cfig->ax.front()->m_ln.size()>0)	
 						deleteObj(cfig->ax.front()->m_ln.front());
-
 					if (main.Sig.GetType()==CSIG_VECTOR)
 						PlotCSignals(ax, main.Sig, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
 					else
@@ -680,7 +679,7 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 	changed=false;
 	HWND h, hList;
 	HINSTANCE hModule = GetModuleHandle(NULL);
-	char buf[1024], buf1[256], buf2[256];
+	char buf[256], buf1[256], buf2[256];
 
 	if ( (h = GetDlgItem(IDC_FS))!=NULL)
 		::SetWindowText(h, itoa(main.pEnv->Fs, buf, 10));
@@ -703,7 +702,6 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		if (k==0 && cell!=NULL) strcpy(buf,"id");
 		else		LoadString(hModule, IDS_STRING105+k, buf, sizeof(buf));
 		res = (int)SendDlgItemMessage(IDC_LIST1, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
-//		fp=fopen("showvarlog.txt","at"), fprintf(fp,"k=%d:buf=%s\n", k, buf),fclose(fp);
 	}
 	int width2[]={60, 45, 50, 300, 40, 60,200,};
 	if (cell!=NULL) {width2[0] = 30; width2[2] = 45;} // narrower width for index and length with cell view
@@ -714,31 +712,20 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		if (k==0 && cell!=NULL) strcpy(buf,"id");
 		else		LoadString(hModule, IDS_STRING101+k, buf, sizeof(buf));
 		res = (int)SendDlgItemMessage(IDC_LIST2, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
-//		fp=fopen("showvarlog.txt","at"), fprintf(fp,"k2=%d:buf=%s\n", k, buf),fclose(fp);
 	}
 	CAstSigEnv *pe;
 	if (cell==NULL) // if it is main work space, grab it from global main
 		pe = main.pEnv;
 	else // else just make a temporary workspace for the input cell variable
 	{
-		char buf[32];
+		char buff[256];
 		pe = new CAstSigEnv(3); // just to circumvent Fs > 1 requirement in CAstSigEnv::CAstSigEnv()
 		for (size_t u=cell->cell.size(); u!=0; u--)
 		{
-			sprintf(buf, "{%d}", u);
-			pe->Tags[buf] = cell->cell[u-1];
+			sprintf(buff, "{%d}", u);
+			pe->Tags[buff] = cell->cell[u-1];
 		}
 	}
-	//size_t ss = pe->Tags.size();
-	//itoa(ss,buf,10);
-	//if (ss>0)
-	//{
-	//	MessageBox("size of main.Tags",buf);
-	//	FILE* ff=fopen("asdf","at");
-	//	fprintf(ff,"size of main.Tags=%d\n",ss);
-	//	fclose(ff);
-	//}
-
 	int xc(0);
 	int k(0); // k is for column
 	string out, arrout, lenout;
@@ -746,7 +733,7 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 	{
 		CSignals tpp = what->second;
 		LvItem.iSubItem=0; //First item (InsertITEM)
-		strcpy(buf,what->first.c_str()); 
+		strcpy(buf, what->first.c_str()); 
 		LvItem.pszText=buf;
 		int type = tpp.GetType();
 		(type==CSIG_AUDIO || type==CSIG_NULL) ? hList = GetDlgItem(IDC_LIST1) : hList = GetDlgItem(IDC_LIST2);
@@ -756,7 +743,8 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		switch(type)
 		{
 		case CSIG_AUDIO:
-			if (!tpp.next)		RMSDB(buf,"-Inf","%5.1f", tpp.RMS())
+			if (tpp.IsLogical()) strcpy(buf, "logical");
+			else if (!tpp.next)		RMSDB(buf,"-Inf","%5.1f", tpp.RMS())
 			else											{	
 				RMSDB(buf1,"-Inf","%5.1f", tpp.RMS()) 
 				RMSDB(buf2,"-Inf","%5.1f", tpp.next->RMS()) 
@@ -787,14 +775,14 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 			LvItem.pszText="complex";
 			break;
 		}
+		if (type!=CSIG_AUDIO && tpp.IsLogical()) LvItem.pszText="logical";
 		::SendMessage (hList, LVM_SETITEM, 0, (LPARAM)&LvItem);
 		LvItem.iSubItem=2; 
 		switch(type)
 		{
 		case CSIG_AUDIO:
 			lenout.clear();
-			// next is CSignal, not CSignals, 
-			// i.e., next does not have next.... 
+			// next is CSignal, not CSignals (next does not have next)
 			xc=0;
 			for (CSignals* pchan=&tpp; xc<2 && pchan; xc++, pchan = (CSignals*)pchan->next)
 			{
@@ -806,7 +794,8 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 				}
 				if (xc==0 && pchan->next) lenout += " ; ";
 			}
-			strcpy(buf, lenout.c_str());
+			if (lenout.size()>256) lenout[255]=0;
+			strcpy_s(buf, 256, lenout.c_str());
 			break;
 		case CSIG_SCALAR:
 			strcpy(buf,"1");
@@ -844,20 +833,30 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		case CSIG_AUDIO:
 			nonnulintervals(&tpp, out, false, true);
 			if (tpp.next) { out += " ; "; nonnulintervals(tpp.next, out, false); }
-			strcpy(buf, out.c_str());
+			if (out.size()>256) out[255]=0;
+			strcpy_s(buf, 256, out.c_str());
 			LvItem.pszText=buf;
 			break;
 		case CSIG_VECTOR:
 			arrout="[";
-			for (int k=0; k<min(tpp.nSamples,10); k++)
-			{	sprintf(buf,"%g ", tpp.buf[k]); arrout += buf;		}
-			if (tpp.nSamples>10) arrout += "...";
-			if (tpp.next)
+			if (tpp.IsLogical())
 			{
-				arrout +=" ; ";
-				for (int k=0; k<min(tpp.next->nSamples,10); k++)
-				{	sprintf(buf,"%g ", tpp.next->buf[k]); arrout += buf;		}
-				if (tpp.next->nSamples>10) arrout += "...";
+				for (int k=0; k<min(tpp.nSamples,10); k++)
+				{	sprintf(buf,"%d ", tpp.logbuf[k]); arrout += buf;		}
+				if (tpp.nSamples>10) arrout += "...";
+			}
+			else
+			{
+				for (int k=0; k<min(tpp.nSamples,10); k++)
+				{	sprintf(buf,"%g ", tpp.buf[k]); arrout += buf;		}
+				if (tpp.nSamples>10) arrout += "...";
+				if (tpp.next)
+				{
+					arrout +=" ; ";
+					for (int k=0; k<min(tpp.next->nSamples,10); k++)
+					{	sprintf(buf,"%g ", tpp.next->buf[k]); arrout += buf;		}
+					if (tpp.next->nSamples>10) arrout += "...";
+				}
 			}
 			strcpy(buf, arrout.c_str());
 			buf[strlen(buf-1)-2] = ']';

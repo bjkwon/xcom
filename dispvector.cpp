@@ -112,12 +112,14 @@ void CVectorsheetDlg::FillupVector(CSignals &sig)
 	}
 	bool ch(sig.GetType()==CSIG_STRING);
 	bool cmplx(sig.IsComplex());
+	bool logic(sig.IsLogical());
 	for(int k = sig.nSamples-1; k>=0; k--)
 	{
 		LvItem.iItem=k; 
 		LvItem.iSubItem=1; 
 		if (ch) sprintf(buf,"%c (%u)", (char)sig.strbuf[k], (unsigned char)sig.strbuf[k]);
 		else if (cmplx) sprintf(buf,"%g %+g * i", sig.buf[2*k], sig.buf[2*k+1]);
+		else if (logic) sprintf(buf,"%d", sig.logbuf[k]);
 		else sprintf(buf,"%g", sig.buf[k]);
 		LvItem.pszText=buf;
 		SendDlgItemMessage(IDC_LISTVECTOR,LVM_SETITEM,0,(LPARAM)&LvItem);

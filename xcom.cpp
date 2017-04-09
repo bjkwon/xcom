@@ -205,6 +205,14 @@ void out4console(const string varname, CSignals *psig, string &out)
 	size_t count;
 	char buf[256];
 	string varname2;
+	if (psig->IsLogical()) 
+	{
+		out += "(logical) "; out += varname; 
+		for (int k=0; k< min (psig->nSamples, DISPLAYLIMIT*4); k++) 
+			{sprintf(buf,"%d ", psig->logbuf[k]); out+=buf;}
+		out +="\n";
+		return;
+	}
 	if (psig->GetType() != CSIG_CELL && varname.size()>0)	out += varname;
 	switch(psig->GetType())
 	{

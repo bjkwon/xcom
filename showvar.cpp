@@ -877,7 +877,10 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 			LvItem.pszText=buf;
 			break;
 		case CSIG_SCALAR:
-			sprintf(buf, "%g", tpp.GetBuffer()[0]);
+			if (tpp.IsLogical())
+				sprintf(buf, "%d", tpp.logbuf[0]);
+			else
+				sprintf(buf, "%g", tpp.value());
 			LvItem.pszText=buf;
 			break;
 		case CSIG_CELL:

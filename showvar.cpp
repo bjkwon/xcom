@@ -806,7 +806,7 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 		case CSIG_STRING:
 		case CSIG_VECTOR:
 		case CSIG_COMPLEX:
-			sprintf(buf, "%d", tpp.nSamples);
+			sprintf(buf, "%d", tpp.length());
 			break;
 		case CSIG_CELL:
 			sprintf(buf, "%d", tpp.cell.size());

@@ -105,7 +105,7 @@ void CVectorsheetDlg::FillupVector(CSignals &sig)
 	LvCol.cx=width[1];	LvCol.pszText="value";
 	SendDlgItemMessage(IDC_LISTVECTOR,LVM_INSERTCOLUMN,1,(LPARAM)&LvCol); 
 	LvItem.iItem=0; LvItem.iSubItem=0; 
-	for(int k = sig.nSamples-1; k>=0; k--)
+	for(int k = sig.length()-1; k>=0; k--)
 	{
 		LvItem.pszText=itoa(k+1,buf,10);
 		SendDlgItemMessage(IDC_LISTVECTOR,LVM_INSERTITEM,0,(LPARAM)&LvItem);
@@ -113,7 +113,8 @@ void CVectorsheetDlg::FillupVector(CSignals &sig)
 	bool ch(sig.GetType()==CSIG_STRING);
 	bool cmplx(sig.IsComplex());
 	bool logic(sig.IsLogical());
-	for(int k = sig.nSamples-1; k>=0; k--)
+	int swsdf= sig.length();
+	for(int k = sig.length()-1; k>=0; k--)
 	{
 		LvItem.iItem=k; 
 		LvItem.iSubItem=1; 

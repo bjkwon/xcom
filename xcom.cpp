@@ -452,8 +452,6 @@ void showarray(int code, CAstSig *main, AstNode *node)
 	}
 }
 
-
-
 void computeandshow(char *AppPath, int code, char *buf)
 {
 	static AstNode node;

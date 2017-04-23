@@ -59,6 +59,7 @@ public:
 	int soundID;
 	bool playing;
 	bool changed;
+	bool win7;
 
 	CShowvarDlg(void);
 	~CShowvarDlg(void);

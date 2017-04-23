@@ -40,6 +40,7 @@ CHistDlg::~CHistDlg(void)
 BOOL CHistDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
 	CWndDlg::OnInitDialog(hwndFocus, lParam);
+//	FILE *fpp = fopen("track.txt","at"); fprintf(fpp,"from histview, parent = %x\n", GetParent(hDlg)); fclose(fpp);
 	lvInit();
 	char buf[256];
 	DWORD dw = sizeof(buf);
@@ -63,13 +64,15 @@ BOOL CHistDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	}
 	else
 	{
-		// Keep the following 3 lines until I am sure that the initial screen anomaly is gone. 10/2/2016 bjk
+		// Keep the following lines until I am sure that the initial screen anomaly is gone. 10/2/2016 bjk
 		//fp=fopen("hist_disappearing_track.txt","at");
 		//fprintf(fp,"history file open error.\n");
 		//fclose(fp);
 
+		//fpp = fopen("track.txt","at"); fprintf(fpp,"histview = %x\n", hDlg); fclose(fpp);
 		FillupHist(lines);
 	}
+	
 	return TRUE;
 }
 

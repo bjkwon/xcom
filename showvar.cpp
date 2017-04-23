@@ -214,6 +214,13 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
 	CWndDlg::OnInitDialog(hwndFocus, lParam);
 
+	char block[4096];
+	float val;
+	getVersionString("cmd.exe", block, sizeof(block));
+	block[4]=0;
+	sscanf(block+1, "%f", &val);
+	if (val<6.2) win7=true;
+
 	RECT rtDlg;
 	char buf[64];
 	mShowDlg.GetWindowRect(&rtDlg);
@@ -238,6 +245,7 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 		(LPARAM)LoadImage(hInst,MAKEINTRESOURCE(IDB_BTM_REFRESH),IMAGE_BITMAP,30,30,LR_DEFAULTSIZE));
 
 	lvInit();
+//	FILE *fpp = fopen("track.txt","at"); fprintf(fpp,"tshowvar = %x\n", hDlg); fclose(fpp);
 	return TRUE;
 }
 
@@ -563,7 +571,11 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 					{
 						CSignals gcf;
 						CRect rt(0, 0, 500, 310);
-						HANDLE fig = OpenGraffy(rt, buf, GetCurrentThreadId(), hDlg, in);
+						HANDLE fig;
+						if (win7)
+							fig = OpenGraffy(rt, buf, GetCurrentThreadId(), NULL, in); // to avoid the z-order problem in Windows 7
+						else
+							fig = OpenGraffy(rt, buf, GetCurrentThreadId(), hDlg, in);
 						HANDLE ax = AddAxis (fig, .08, .18, .86, .72);
 						CAxis *cax = static_cast<CAxis *>(ax);
 						if (main.Sig.GetType()==CSIG_VECTOR)

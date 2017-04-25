@@ -8,7 +8,7 @@
 #define RETURNWITHERRMSG(X) {sprintf(errstr, "Error in ( "#X " )"); return 0;}
 #define RETURNWITHERRMSG2(X,Y) {sprintf(errstr, "Error in ( "#X #Y" )"); return 0;}
 
-#define VERSIONSTR	"0.9"
+#define VERSIONSTR	"1.1"
 
 extern CAstSig main;
 
@@ -17,7 +17,7 @@ void nonnulintervals(CSignals *psig, string &out);
 
 int save_axl(FILE *fp, const char * var, char *errstr)
 {
-	char *buffer, buf[256], fullmoduleName[256];
+	char buf[256], fullmoduleName[256];
 	CSignals tp;
 	size_t sz;
 	unsigned char dummy(0), type;
@@ -38,8 +38,9 @@ int save_axl(FILE *fp, const char * var, char *errstr)
 	{
 		RETURN0IFINVALID( fwrite((void*)&header, strlen(header), 1, fp) )
 		tp = what->second;
-		type=(unsigned char)tp.GetType();
-		RETURN0IFINVALID( fwrite((void*)&type, sizeof(char), 1, fp) )
+		type=tp.GetType();
+		char typePlus=(char)tp.GetTypePlus();
+		RETURN0IFINVALID( fwrite((void*)&typePlus, sizeof(char), 1, fp) )
 		RETURN0IFINVALID( fwrite((void*)var, strlen(var)+1, 1, fp) )
 		do	{
 			sz = tp.nSamples;
@@ -48,28 +49,25 @@ int save_axl(FILE *fp, const char * var, char *errstr)
 			case CSIG_EMPTY:
 			case CSIG_STRING:
 				RETURN0IFINVALID( fwrite((void*)&sz, sizeof(sz), 1, fp) )
-				if (sz>0)
-				{
-					buffer = new char[sz+1];
-					tp.getString(buffer,sz+1);
-					RETURN0IFINVALID( fwrite((void*)buffer, sz, 1, fp) )
-					delete[] buffer;
-				}
+				if (sz>0)	RETURN0IFINVALID( fwrite((void*)tp.strbuf, sz, 1, fp) )
 				break;
 			case CSIG_SCALAR:
+			case CSIG_COMPLEX:
 			case CSIG_VECTOR:
+			case CSIG_VECTOR-1:
 				RETURN0IFINVALID( fwrite((void*)&sz, sizeof(sz), 1, fp) )
-				RETURN0IFINVALID( fwrite((void*)tp.GetBuffer(), sizeof(double), tp.nSamples, fp) )
+				RETURN0IFINVALID( fwrite((void*)tp.buf, tp.bufBlockSize, tp.nSamples, fp) )
 				break;
 			case CSIG_AUDIO:
 				wherenow = ftell(fp);
 				sz = tp.IsStereo();//0 for mono, 1 for stereo...
+				if (tp.IsLogical()) sz += 2; //2 for mono logical, 3 for stereo logical...
 				RETURN0IFINVALID( fwrite((void*)&sz, sizeof(sz), 1, fp) )
 				wherenow = ftell(fp);
 				tp.WriteAXL(fp);
 				break;
 			case CSIG_CELL:
-				cellcount = tp.cell.size();
+				cellcount = (int)tp.cell.size();
 				RETURN0IFINVALID( fwrite((void*)&cellcount, sizeof(cellcount), 1, fp) )
 				break;
 			}
@@ -110,41 +108,50 @@ int load_axl(FILE *fp, char *errstr)
 		RETURN0IFINVALID( (res=fread((void*)&readbuf, 1,sizeof(readbuf),fp)) )
 		strncpy(varname, readbuf, sizeof(readbuf)); varname[255]=0;
 		if (strlen(varname)>=sizeof(readbuf)-1) { sprintf(errstr,"varname longer than specified."); return -1;}
-		RETURN0IFINVALID0( res = fseek(fp, wherenow+strlen(varname)+1, SEEK_SET) )
+		RETURN0IFINVALID0( res = fseek(fp, wherenow+(int)strlen(varname)+1, SEEK_SET) )
 //		RETURN0IFINVALID( fscanf(fp, "%s", varname) ) //#load xy wipes off fp in the second time around (for y) here..  I will need to get rid of fscanf and use fread...
 //		RETURN0IFINVALID0( res = fseek(fp, wherenow+strlen(varname)+1, SEEK_SET) )
 		while (1)
 		{
-			RETURN0IFINVALID( res = fread((void*)&sz, sizeof(size_t),1,fp) )
+			RETURN0IFINVALID( res = fread((void*)&sz, sizeof(size_t), 1, fp) )
 			wherenow = ftell(fp);
 			switch(type)
 			{
 			case CSIG_EMPTY:
 			case CSIG_STRING:
 				buffer = new char[sz];
-				res = fread((void*)buffer, sz, 1,fp);
+				res = fread((void*)buffer, sz, 1, fp);
 				tp.Reset(2);
 				tp.UpdateBuffer((int)sz);
-				for (size_t i=0, j=0; i<sz; i++, j++)
-					tp.buf[j] = buffer[i];
+				memcpy(tp.strbuf, buffer, sz);
 				delete[] buffer;
 				break;
 			case CSIG_SCALAR:
+				tp.SetValue(0.);
+				RETURN0IFINVALID( res = fread(tp.buf, tp.bufBlockSize, sz, fp) )
+				break;
+			case CSIG_COMPLEX:
 			case CSIG_VECTOR:
+			case CSIG_VECTOR-1:
 				tp.Reset(1);
+				if (type/2*2 == type) //if odd, logical
+					tp.MakeLogical();
+				else if (type==CSIG_COMPLEX)
+					tp.bufBlockSize = 16;
 				tp.UpdateBuffer((int)sz);
-				RETURN0IFINVALID( res = fread((void*)&tp.GetBuffer()[0], sizeof(double),sz,fp) )
+				RETURN0IFINVALID( res = fread(tp.logbuf, tp.bufBlockSize, sz, fp) )
 				break;
 			case CSIG_CELL: // for a cell variable, sz means the element counts
-				nElem = sz;
+				nElem = (int)sz;
 				break;
 			case CSIG_AUDIO:
+			case CSIG_AUDIO-1:
 				nChannels = (int)sz; 
-				tp.ReadAXL(fp);
-				if (nChannels) // stereo
+				tp.ReadAXL(fp, nChannels>1);
+				if (nChannels==1 || nChannels==3) // stereo
 				{
 					CSignals sec;
-					if (sec.ReadAXL(fp)) tp.SetNextChan(&sec);
+					if (sec.ReadAXL(fp, nChannels>1)) tp.SetNextChan(&sec);
 				}
 				break;
 			default:

@@ -79,7 +79,7 @@ void print_node_struct (int layer, FILE* fp, string str, AstNode *node)
 	//	print_node_struct(++layer, fp, "LastChild...\n", node->LastChild); --layer;}
 }
 
-void ClearVar(const char*var)
+int ClearVar(const char*var)
 {
 	CAstSigEnv *pe = main.pEnv;
 	if (var[0]==0) // clear all
@@ -87,6 +87,7 @@ void ClearVar(const char*var)
 		pe->Tags.erase(pe->Tags.begin(), pe->Tags.end());
 		pe->UDFs.erase(pe->UDFs.begin(), pe->UDFs.end());
 		mShowDlg.changed=true;
+		return 1;
 	}
 	else
 	{
@@ -100,7 +101,7 @@ void ClearVar(const char*var)
 				{
 					pe->Tags.erase(what);
 					mShowDlg.changed=true;
-					break;
+					return 1;
 				}
 			}
 		}
@@ -116,6 +117,7 @@ void ClearVar(const char*var)
 				}
 			}
 		}
+		return 0;
 	}
 }
 
@@ -442,17 +444,10 @@ void showarray(int code, CAstSig *main, AstNode *node)
 	case ID_STOP:
 		TerminatePlay();
 		break;
-	case ID_SAVE:
-		break;
-	case ID_CLEARVAR:
-		if (tp.getString(buf, 256)==NULL) printf("Invalid argument to clear variable\n");
-		else
-			ClearVar(buf);
-		break;
 	}
 }
 
-void computeandshow(char *AppPath, int code, char *buf)
+void computeandshow(char *AppPath, int code, string input)
 {
 	static AstNode node;
 	static CSignals Sig;
@@ -460,12 +455,11 @@ void computeandshow(char *AppPath, int code, char *buf)
 	FILE *fp;
 	string savesuccess;
 	bool err(false);
-	char errstr[256], filename[MAX_PATH], ext[MAX_PATH];
-	size_t nItems;
+	char errstr[256], buffer[MAX_PATH], drive[64], dir[MAX_PATH], filename[MAX_PATH], ext[MAX_PATH];
+	size_t k(0), nItems;
+	int success(0);
 	vector<string> varlist, tar;
-	filename[0]=0;
-	trimLeft(buf," \t");
-	trimRight(buf," \t");
+	trim(input, " \t");
 	switch(code)
 	{
 	case ID_SHOWVAR:
@@ -480,24 +474,37 @@ void computeandshow(char *AppPath, int code, char *buf)
 	case ID_SHOWFS:
 		printf("Sampling Rate=%d\n", main.pEnv->Fs);
 		break;
+	case ID_CLEARVAR:
+		nItems = str2vect(tar, input.c_str(), " ");
+		if (nItems>0) savesuccess = "Variable(s) cleared: ";
+		for (; k<nItems; k++)
+			if (ClearVar(tar[k].c_str()))
+				success++, sprintf(ext, "%s ", tar[k].c_str()), savesuccess+= ext;
+		if (success) printf("%s\n", savesuccess.c_str()), mShowDlg.FillupShowVar();
+		break;
 	case ID_LOAD:
-		fname = buf;
+		fname = input;
 		fp = main.OpenFileInPath(fname, "axl");
-		if (fp==NULL)
-			printf("File %s not found in %s\n", strcat(buf,".axl"), main.pEnv->AuxPath.c_str()); 
-		else
+		if (fp)
 		{
-			if (load_axl(fp, errstr)==0) printf("File %s reading error----%s.\n", fname.c_str(), errstr);
+			if (load_axl(fp, errstr)==0) 
+				printf("File %s reading error----%s.\n", fname.c_str(), errstr);
 			fclose(fp);
 			mShowDlg.FillupShowVar();
 		}
+		else
+			printf("File %s not found in %s\n", string(input+".axl").c_str(), main.pEnv->AuxPath.c_str()); 
 		break;
 	case ID_SAVE:
-		if ((nItems = str2vect(tar, buf, " "))==0)
+		if ((nItems = str2vect(tar, input.c_str(), " "))==0)
 		{	printf("#save (filename) var1 var2 var3...\n");		break;		}
-		fname = tar[0];
-		_splitpath(fname.c_str(), NULL, NULL, filename, ext);
+		_splitpath(tar[0].c_str(), drive, dir, filename, ext);
+		if (strlen(drive)+strlen(dir)==0) 
+			FulfillFile(buffer, AppPath, filename), fname=buffer;
+		else
+			fname = tar[0];
 		if (strlen(ext)==0) fname += ".axl";
+		else fname += ext;
 		if (nItems==1) // no variables indicated.. save all
 		{
 			EnumVariables(varlist);
@@ -506,10 +513,9 @@ void computeandshow(char *AppPath, int code, char *buf)
 			for (unsigned int k=1; sz>0 && k<nItems; k++)  
 				tar.push_back(varlist[k-1]);
 		}
-		if ((fp = fopen(fname.c_str(), "wb"))==NULL) printf("File %s cannot be open for writing.\n", tar[0].c_str());
-		else
+		if (fp = fopen(fname.c_str(), "wb")) 
 		{
-			printf("File %s saved with ...\n", tar[0].c_str());
+			printf("File %s saved with ...\n", fname.c_str());
 			for (unsigned int k=1; k<nItems; k++)
 			{
 				if (save_axl(fp, tar[k].c_str(), errstr)==0)
@@ -527,33 +533,27 @@ void computeandshow(char *AppPath, int code, char *buf)
 				fp=fopen(fname.c_str(), "ab");
 			}
 		}
+		else
+			printf("File %s cannot be open for writing.\n", tar[0].c_str());
 		if (!err)	printf("%s \n", savesuccess.c_str());
 		fclose(fp);
 		break;
 	default:
 		if (code==ID_STOP)
-		{
 			showarray(code, NULL, NULL);
-		}
-		else if (strlen(buf)>0)
+		else if (input.size()>0)
 		{
 		try {
-			main.SetNewScript(buf,&node);
+			main.SetNewScript(input.c_str(),&node);
 			main.Sig = main.Compute();
 			//NODE_BLOCK: multiple statements on one line
 			//NODE_CALL : function call, include call, eval call
-			trimRight(buf," \t\r\n");
-			if ( node.type==NODE_BLOCK || buf[strlen(buf)-1]!=';')
+			trimr(input, "\r\n");
+			string::iterator it=input.end()-1;
+			bool suppress ( *it==';' );
+			if ( node.type==NODE_BLOCK || !suppress)
 				showarray(code, &main, &node);
-
-			//
-			//{
-			//	if (node.type!=NODE_CALL || strcmp(node.str,"plot") * strcmp(node.str,"play") * strcmp(node.str,"show")  ||
-			//		strcmp(node.str,"sscanf") * strcmp(node.str,"fprintf") * strcmp(node.str,"fdelete") ||
-			//		strcmp(node.str,"file") * strcmp(node.str,"include") * strcmp(node.str,"eval") )
-			//}
-			mShowDlg.changed=true;
-			mShowDlg.FillupShowVar(); // this line was added on 10/2/2016.. probably all the other things about mShowDlg.changed is no longer necessary... bjk
+			mShowDlg.FillupShowVar();
 			AstNode *p = (node.type==NODE_BLOCK) ? node.child : &node;
 			for (; p; p = p->next)
 				if (p->type!=T_ID && p->type!=T_NUMBER && p->type!=T_STRING) //For these node types, 100% chance that var was not changed---do not send WM__VAR_CHANGED
@@ -832,21 +832,17 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 			else if (tar[0]=="hist")	code = ID_HISTORY;
 			else if (tar[0]=="fs")		code = ID_SHOWFS;
 			else if (tar[0]=="ws" || tar[0]=="workspace")		code = ID_SHOWVAR;
-			else if (tar[0]=="clear")	{ 
-				if (nOut==1) tar.push_back(""); 
-				ClearVar(tar[1].c_str()); printf("AUX>");
-				continue;}
 			else if (tar[0]=="save")	code = ID_SAVE;  
 			else if (tar[0]=="load")	code = ID_LOAD;
 			else if (tar[0]=="quit")	{LOGHISTORY("//\t""quit""") break;}
+			else if (tar[0]=="clear")	code = ID_CLEARVAR;
 			else						code = ID_ERR;
 		}
 		else
 			code = ID_DEFAULT;
-
 		buff = buf;
 		if (code != ID_DEFAULT) buff += tar[0].length()+1;
-		computeandshow(AppPath, code, buff);
+		computeandshow(AppPath, code, string (buff));
 	}
     GetLocalTime(&lt);	
 	closeXcom(&lt,AppPath);

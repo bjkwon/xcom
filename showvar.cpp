@@ -17,6 +17,8 @@ extern double playbackblock;
 
 FILE *fp;
 
+int ClearVar(const char*var); // from xcom.cpp
+
 vector<CWndDlg*> cellviewdlg;
 
 void plotThread (PVOID var);
@@ -31,6 +33,18 @@ BOOL AboutDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 #define RMSDB(BUF,FORMAT1,FORMAT2,X) { double rms;	if ((rms=X)==-1.*std::numeric_limits<double>::infinity()) strcpy(BUF, FORMAT1); else sprintf(BUF, FORMAT2, rms); }
 
 AUDFRET_EXP void makewmstr(map<unsigned int, string> &wmstr);
+
+bool isWin7()
+{
+	char block[4096];
+	float val;
+	getVersionString("cmd.exe", block, sizeof(block));
+	block[4]=0;
+	sscanf(block+1, "%f", &val);
+	if (val<6.2) return true;
+	else return false;
+}
+
 
 LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 {
@@ -58,6 +72,7 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 					CFigure *cfig = static_cast<CFigure *>(fig);
 					HANDLE ax = cfig->ax.front();
 					CAxis *cax = static_cast<CAxis *>(ax);
+					SetRange(ax, 'x', 0., -1.);  // $$2816xlim 4/25/2017
 					double xlim[2];
 					memcpy(xlim,cax->xlim, 2*sizeof(cax->xlim[0]));
 					while(cfig->ax.front()->m_ln.size()>0)	
@@ -68,8 +83,6 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 						PlotCSignals(ax, main.Sig, 0xff0000);
 					if (main.Sig.next)
 						PlotCSignals(ax, *main.Sig.next, RGB(200,0,50));
-					if (cax->xlim[0]<xlim[0] && cax->xlim[1]>xlim[1])
-						SetRange(ax, 'x', xlim[0], xlim[1]); 
 					main.SetTag("gcf", *tp);
 					mShowDlg.FillupShowVar();
 				}
@@ -174,7 +187,7 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 }
 
 CShowvarDlg::CShowvarDlg(void)
-:changed(false)
+:changed(false), win7(false)
 {
 
 }
@@ -192,9 +205,9 @@ void CShowvarDlg::OnVarChanged(char *varname)
 
 void CShowvarDlg::OnPlotDlgCreated(char *varname, GRAFWNDDLGSTRUCT *pin)
 {
-	CSignals gcf;
-	GetFigID(pin->fig, gcf);
-	main.SetTag("gcf", gcf);
+	//It's better to update gcf before WM__PLOTDLG_CREATED is posted
+	//that way, environment context can be set properly (e.g., main or inside CallSub)
+	//4/24/2017 bjkwon
 	if (strlen(varname)>0)
 		FillupShowVar();
 	HHOOK hh = SetWindowsHookEx (WH_GETMESSAGE, HookProc, NULL, pin->threadPlot);
@@ -214,12 +227,7 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
 	CWndDlg::OnInitDialog(hwndFocus, lParam);
 
-	char block[4096];
-	float val;
-	getVersionString("cmd.exe", block, sizeof(block));
-	block[4]=0;
-	sscanf(block+1, "%f", &val);
-	if (val<6.2) win7=true;
+	if (isWin7()) win7=true;
 
 	RECT rtDlg;
 	char buf[64];
@@ -459,10 +467,8 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 
 	LPNMHDR pnm = (LPNMHDR)lParam;
 	LPNMLISTVIEW pview = (LPNMLISTVIEW)lParam;
-//	LPNMKEY nmkey;
 	LPNMLVKEYDOWN lvnkeydown;
 	UINT code=pnm->code;
-//	NMITEMACTIVATE *pnmitem;
 	LPNMITEMACTIVATE lpnmitem;
 	static int clickedRow;
 	bool alreadymade(false);
@@ -549,6 +555,10 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 			strbuf = buf;
 			switch(lvnkeydown->wVKey)
 			{
+			case VK_DELETE: // $$231109 4/25/2017
+				ClearVar(buf);
+				FillupShowVar();
+				break;
 			case VK_SPACE:
 				selectState.resize(ListView_GetItemCount(lvnkeydown->hdr.hwndFrom));
 				for (int k(0); k<ListView_GetItemCount(lvnkeydown->hdr.hwndFrom); k++)
@@ -571,11 +581,7 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 					{
 						CSignals gcf;
 						CRect rt(0, 0, 500, 310);
-						HANDLE fig;
-						if (win7)
-							fig = OpenGraffy(rt, buf, GetCurrentThreadId(), NULL, in); // to avoid the z-order problem in Windows 7
-						else
-							fig = OpenGraffy(rt, buf, GetCurrentThreadId(), hDlg, in);
+						HANDLE fig = OpenGraffy(rt, buf, GetCurrentThreadId(), win7 ? NULL:hDlg, in); // due to z-order problem in Windows 7
 						HANDLE ax = AddAxis (fig, .08, .18, .86, .72);
 						CAxis *cax = static_cast<CAxis *>(ax);
 						if (main.Sig.GetType()==CSIG_VECTOR)
@@ -584,6 +590,9 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 							PlotCSignals(ax, main.Sig, 0xff0000);
 						if (main.Sig.next)
 							PlotCSignals(ax, *main.Sig.next, RGB(200,0,50));
+						//update gcf here
+						GetFigID(in.fig, gcf);
+						main.SetTag("gcf", gcf);
 						PostMessage(WM__PLOTDLG_CREATED, (WPARAM)buf, (LPARAM)&in);
 					}
 				}

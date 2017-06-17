@@ -1,0 +1,16 @@
+$$gcfcontext38475
+Prev gcf was not updated when running inside of a UDF because SetTag was called with "main". Now SetTag for gcf is called with proper context
+$$8233
+#save filenamestring_only_without_path will save it in current directory (AppPath)
+$$3982
+#load string_variable following the current rule
+$$12327
+#clear updates showvarDlg
+$$2934
+#save #load work with logical and complex variables
+$$231109
+DEL key in showvarDlg will delete variables
+$$2816xlim
+when gcf is updated with shorter length, xlim was not updated--this happened since bug for stereo xlim was fixed.
+
+above is for v1.16=========================4/25/2017

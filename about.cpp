@@ -111,7 +111,7 @@ Gave up and used the subclassed static control from SSpoke. 7/7/2016 bjk
 /* Subclassing static control to make it act like syslink
    Source: http://stackoverflow.com/questions/7784975/c-win32-add-a-hyperlink-to-a-dialog
    Author: SSpoke 
-   Slightly edited by bjkwon to compatible with WIN64  7/7/2016
+   Slightly edited by bjkwon to make compatible with WIN64  7/7/2016
    Don't forget to change LONG to LONG_PTR 10/8/2016 
 */
 

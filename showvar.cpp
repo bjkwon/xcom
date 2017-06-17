@@ -3,32 +3,45 @@
 #include "showvar.h"
 #include "resource1.h"
 #include "audfret.h"
+#include "xcom.h"
+#include "xcom.h"
+#include "histDlg.h"
+
+
+extern xcom mainSpace;
+
+extern CDebugDlg mDebug; // delete?
+extern map<string, CDebugDlg*> dbmap;
 
 extern CWndDlg wnd;
 extern CShowvarDlg mShowDlg;
-extern CAstSig main;
+//extern CAstSig main;
 extern char udfpath[4096];
 extern void* soundplayPt;
 extern double playbackblock;
 
+extern HANDLE hEvent;
+extern CHistDlg mHistDlg;
 
 #define CELLVIEW 87893
 #define ID_HELP_SYSMENU		33758
 
+#define WM__DEBUG	WM_APP+3321 // do something later 6/4/2017 6pm
+
+
+
 FILE *fp;
 
-int ClearVar(const char*var); // from xcom.cpp
-
 vector<CWndDlg*> cellviewdlg;
+CFileDlg fileDlg;
 
-void plotThread (PVOID var);
-CSignals &GetSig(string varname);
-CSignals *GetSig(char *var);
 void nonnulintervals(CSignal *psig, string &out, bool unit, bool clearout=false);
 HWND CreateTT(HINSTANCE hInst, HWND hParent, RECT rt, char *string, int maxwidth=400);
+BOOL CtrlHandler( DWORD fdwCtrlType );
 
 BOOL CALLBACK vectorsheetDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL AboutDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK debugDlgProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 
 #define RMSDB(BUF,FORMAT1,FORMAT2,X) { double rms;	if ((rms=X)==-1.*std::numeric_limits<double>::infinity()) strcpy(BUF, FORMAT1); else sprintf(BUF, FORMAT2, rms); }
 
@@ -45,10 +58,22 @@ bool isWin7()
 	else return false;
 }
 
+LRESULT CALLBACK HookProc2(int code, WPARAM wParam, LPARAM lParam)
+{
+	static	char varname[256];
+	switch(code)
+	{
+	case HC_ACTION:
+		SetEvent(hEvent);
+	break;
+	}
+	return CallNextHookEx(NULL, code, wParam, lParam);
+}
 
 LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 {
 	static	char varname[256];
+	CSignals *tp;
 	switch(code)
 	{
 	case HC_ACTION:
@@ -59,13 +84,17 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 			{
 				if (GetFigID(pmsg->hwnd, gcf) || GetFigID(GetParent(pmsg->hwnd), gcf))
 				{
-					main.SetTag("gcf", gcf);
-					mShowDlg.FillupShowVar();
+//					main.SetTag("gcf", gcf);
+					mShowDlg.Fillup();
 				}
 			}
 			else if (pmsg->message==WM__VAR_CHANGED)
 			{
-				CSignals *tp = GetSig((char*)pmsg->wParam);
+				if (!(tp = (CSignals *)pmsg->lParam))
+				{
+					CAstSig *pabteg = *(mainSpace.vecast.end()-1);
+					tp = pabteg->pEnv->GetSig((char*)pmsg->wParam);
+				}
 				if (tp && (tp->GetType()==CSIG_AUDIO || tp->GetType()==CSIG_VECTOR))
 				{
 					HANDLE fig = FindFigure((char*)pmsg->wParam);
@@ -77,14 +106,14 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 					memcpy(xlim,cax->xlim, 2*sizeof(cax->xlim[0]));
 					while(cfig->ax.front()->m_ln.size()>0)	
 						deleteObj(cfig->ax.front()->m_ln.front());
-					if (main.Sig.GetType()==CSIG_VECTOR)
-						PlotCSignals(ax, main.Sig, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
+					if (tp->GetType()==CSIG_VECTOR)
+						PlotCSignals(ax, *tp, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
 					else
-						PlotCSignals(ax, main.Sig, 0xff0000);
-					if (main.Sig.next)
-						PlotCSignals(ax, *main.Sig.next, RGB(200,0,50));
-					main.SetTag("gcf", *tp);
-					mShowDlg.FillupShowVar();
+						PlotCSignals(ax, *tp, 0xff0000);
+					if (tp->next)
+						PlotCSignals(ax, *tp->next, RGB(200,0,50));
+//					main.SetTag("gcf", *tp);
+					mShowDlg.Fillup();
 				}
 				else // if the variable is no longer unavable, audio or vector, exit the thread (and delete the fig window)
 					PostThreadMessage (GetCurrentThreadId(), WM_QUIT, 0, 0);
@@ -134,7 +163,7 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 	case WM_ACTIVATE:
 		SetForegroundWindow (hDlg);
 		if (cvDlg->changed) 
-			cvDlg->FillupShowVar();
+			cvDlg->Fillup();
 		break;
 	chHANDLE_DLGMSG (hDlg, WM_INITDIALOG, cvDlg->OnInitDialog);
 	chHANDLE_DLGMSG (hDlg, WM_SIZE, cvDlg->OnSize);
@@ -156,7 +185,7 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM__VAR_CHANGED: // Posted by plotThread when the plot dlg is displayed.
-		cvDlg->OnVarChanged((char*)wParam);
+		cvDlg->OnVarChanged((char*)wParam, (CSignals*)lParam);
 		break;
 
 	case WM_APP+WOM_OPEN: // from waves.cpp in sigproc
@@ -173,13 +202,23 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 	{
 		CSignals gcf;
 		GetFigID((HANDLE)wParam, gcf);
-		main.SetTag("gcf", gcf);
+		cvDlg->cast.SetTag("gcf", gcf);
 		cvDlg->OnCommand(IDC_REFRESH, NULL, 0);
 		break;
 	}
 	//case WM_SYSCOMMAND:
 
-	//	break;
+	case WM_APP+4000:
+		cvDlg->OnDebug(*(DEBUG_STATUS*)wParam, (CAstSig *)lParam, umsg-(WM_APP+4000));
+		break;
+
+	case WM_DEBUG_CLOSE:
+		if (dbmap.find((char*)wParam)!=dbmap.end())
+		{
+			map<string, CDebugDlg*>::iterator it = dbmap.find((char*)wParam);
+			delete it->second;
+		}
+		break;
 	default:
 		return FALSE;
 	}
@@ -197,21 +236,59 @@ CShowvarDlg::~CShowvarDlg(void)
 
 }
 
-void CShowvarDlg::OnVarChanged(char *varname)
+void CShowvarDlg::OnVarChanged(char *varname, CSignals *sig)
 {
 	if (strlen(varname) && plotDlgThread.find(varname) != plotDlgThread.end())
-		PostThreadMessage(plotDlgThread[varname], WM__VAR_CHANGED, (WPARAM)varname, 0);
+		PostThreadMessage(plotDlgThread[varname], WM__VAR_CHANGED, (WPARAM)varname, (LPARAM)sig); // this is processed in HookProc
 }
 
+void CShowvarDlg::OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
+{
+	char buf[256], *buff;
+	DWORD dw;
+	map<string, CDebugDlg*>::iterator it;
+	int code, res, line;
+
+	switch(status)
+	{
+	case entering: 
+		mainSpace.vecast.push_back(debugAstSig);
+		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_ADDSTRING, 0, (LPARAM)debugAstSig->GetScript().c_str());
+	case progress:
+		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, 1);
+		if ((it = dbmap.find(debugAstSig->GetScript()))!=dbmap.end()) 
+			::SendMessage((lastDebug=it->second->hDlg), WM__DEBUG, (WPARAM)status, (LPARAM)debugAstSig);
+		break;
+	case stepping:
+		line = (int)debugAstSig;
+		::SendMessage(lastDebug, WM__DEBUG, (WPARAM)status, (LPARAM)line);
+		break;
+	case exiting:
+		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, 0);
+		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_DELETESTRING , 1);
+		mainSpace.vecast.pop_back();
+		::SendMessage(lastDebug, WM__DEBUG, (WPARAM)status, (LPARAM)debugAstSig);
+		break;
+	/*	for (map<string, set<int>>::iterator it = mainSpace.UDFsDebugging.begin(); it!=mainSpace.UDFsDebugging.end(); it++)
+		{
+			mainSpace.UDFsDebugging[it->first] = dbmap[it->first]->breakpoint;
+		}*/
+
+
+
+		break;
+	}
+}
 void CShowvarDlg::OnPlotDlgCreated(char *varname, GRAFWNDDLGSTRUCT *pin)
 {
 	//It's better to update gcf before WM__PLOTDLG_CREATED is posted
 	//that way, environment context can be set properly (e.g., main or inside CallSub)
 	//4/24/2017 bjkwon
 	if (strlen(varname)>0)
-		FillupShowVar();
+		Fillup();
 	HHOOK hh = SetWindowsHookEx (WH_GETMESSAGE, HookProc, NULL, pin->threadPlot);
-
+	HHOOK hh2 = SetWindowsHookEx (WH_KEYBOARD, HookProc2, NULL, pin->threadPlot);
+	
 	// this line is problematic... If varname is empty, new plotDlgThread replaces the old one.
 	// maybe this is OK if the use of plotDlgThread is limited to cases of non-empty varname 
 	// 02/20/2017 bjk
@@ -249,11 +326,16 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 		::MoveWindow(GetDlgItem(IDC_STATIC_NONAUDIO), 7, cy/2, 210, 18, NULL);
 		::MoveWindow(GetDlgItem(IDC_LIST2), 5, cy/2+16, cx, cy*5/11, NULL);
 	}
+	else
+		fileDlg.InitFileDlg(hDlg, hInst, "");
 	SendDlgItemMessage(IDC_REFRESH,BM_SETIMAGE, (WPARAM)IMAGE_BITMAP,
 		(LPARAM)LoadImage(hInst,MAKEINTRESOURCE(IDB_BTM_REFRESH),IMAGE_BITMAP,30,30,LR_DEFAULTSIZE));
 
 	lvInit();
 //	FILE *fpp = fopen("track.txt","at"); fprintf(fpp,"tshowvar = %x\n", hDlg); fclose(fpp);
+
+	SendDlgItemMessage(IDC_DEBUGSCOPE, CB_ADDSTRING, 0, (LPARAM)"base workspace");
+	SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, 0);
 	return TRUE;
 }
 
@@ -268,10 +350,10 @@ void CShowvarDlg::OnSize(UINT state, int cx, int cy)
 {
 	if (hDlg==mShowDlg.hDlg)
 	{
-		::MoveWindow(GetDlgItem(IDC_LIST1), 5, 50, cx, cy*4/11, 1);
-		::MoveWindow(GetDlgItem(IDC_LIST2), 5, cy/2+30, cx, cy*4/11, 1);
-		::MoveWindow(GetDlgItem(IDC_STATIC_AUDIO), 7, 30, cx/2, 18, 1);
-		::MoveWindow(GetDlgItem(IDC_STATIC_NONAUDIO), 7, cy/2+5, cx/2, 18, 1);
+		::MoveWindow(GetDlgItem(IDC_LIST1), 5, 80, cx, cy*4/11, 1);
+		::MoveWindow(GetDlgItem(IDC_LIST2), 5, cy/2+50, cx, cy*4/11, 1);
+		::MoveWindow(GetDlgItem(IDC_STATIC_AUDIO), 7, 65, cx/2, 18, 1);
+		::MoveWindow(GetDlgItem(IDC_STATIC_NONAUDIO), 7, cy/2+30, cx/2, 18, 1);
 	}
 	else
 	{
@@ -320,9 +402,9 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 	size_t id;
 	vector<HANDLE> figs;
 	char *longbuffer;
-	char errstr[256];
+	char fullfname[256], fname[256], errstr[256];
 //	if (changed) 
-//		FillupShowVar(); 
+//		Fillup(); 
 	
 	switch(idc)
 	{
@@ -333,13 +415,13 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 		if (event==EN_KILLFOCUS)
 		{
 			res = GetDlgItemInt(idc);
-			if (res!=main.GetFs())
+			if (res!=cast.GetFs())
 			{
 				if (res<500) MessageBox("Sampling rate must be greater than 500 Hz.");
 				else
 				{
-					main.pEnv->Fs = res; //Sample rate adjusted
-					CAstSigEnv *pe = main.pEnv;
+					cast.pEnv->Fs = res; //Sample rate adjusted
+					CAstSigEnv *pe = cast.pEnv;
 					for (map<string, CSignals>::iterator what=pe->Tags.begin(); what!=pe->Tags.end(); what++)
 					{
 						CSignals tpp = what->second;
@@ -364,7 +446,7 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 			addp = AppPath;
 			addp += ';';
 			addp += longbuffer;
-			main.SetPath(addp.c_str());
+			cast.SetPath(addp.c_str());
 		}
 		delete[] longbuffer;
 		break;
@@ -384,10 +466,39 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 		TerminatePlay();
 		break;
 
-	case IDC_REFRESH: 
-		FillupShowVar();
+	case IDC_REFRESH: //let's get rid of this.... 5/1/2017 bjk
+		Fillup();
 		UpdateSheets();
 		changed = false;
+		break;
+
+	case IDC_DEBUG:
+		fullfname[0]=fname[0]=0;
+		if (fileDlg.FileOpenDlg(fullfname, fname, "AUX UDF file (*.AUX)\0*.aux\0", "aux"))
+		{
+			// if the UDF name is not on the map, create a new map element
+			if (dbmap.find(fname)==dbmap.end())
+			{
+				CDebugDlg *newdbdlg = new CDebugDlg;
+				CREATE_CDebugDlg transfer;
+				transfer.dbDlg = newdbdlg;
+				strcpy(transfer.fullfilename, fullfname);
+				if (newdbdlg->hDlg = CreateDialogParam (hInst, MAKEINTRESOURCE(IDD_DEBUG), hDlg, (DLGPROC)debugDlgProc, (LPARAM)&transfer))
+				{
+					char *pt = strchr(fname,'.');
+					pt[0]=0;
+					cast.pEnv->AddDelDebugging(fname, 1);
+				}
+			}
+
+//			LvItem.pszText=fullfname;
+//			LvItem.iItem=ListView_GetItemCount(hList)+1;
+//			SendDlgItemMessage(IDC_LIST,LVM_INSERTITEM,0,(LPARAM)&LvItem);
+		}
+		else
+		{
+			if (GetLastError()!=0) GetLastErrorStr(errstr), MessageBox (errstr, "File Open dialog box error");
+		}
 		break;
 	case IDCANCEL:
 		OnClose();
@@ -399,15 +510,16 @@ void CShowvarDlg::OnCloseFig(int figID)
 {
 
 }
+
 bool IsMarkedToDelete(CWndDlg* x)
 {
-	char buf[256]; 
-	x->GetWindowTextA(buf,256);
-	if (GetSig(buf)==NULL)
-	{
-		x->DestroyWindow(); 
-		return true;
-	}
+	//char buf[256]; 
+	//x->GetWindowTextA(buf,256);
+	//if (GetSig(buf)==NULL)
+	//{
+	//	x->DestroyWindow(); 
+	//	return true;
+	//}
 	return false;
 }
 
@@ -421,7 +533,7 @@ void CShowvarDlg::UpdateSheets()
 	for (vector<CWndDlg*>::iterator it=m_sheets.begin(); it<m_sheets.end(); ++it)
 	{
 		if (!(*it)->GetWindowTextA(buf, 256)) MessageBox("GetWindowTextA error");
-		((CVectorsheetDlg*)(*it))->FillupVector(*GetSig(buf)); // now, GetSig(buf) is never NULL because of remove_if above
+		((CVectorsheetDlg*)(*it))->FillupVector(*cast.pEnv->GetSig(buf)); // now, GetSig(buf) is never NULL because of remove_if above
 	}
 }
 
@@ -461,7 +573,6 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	int res(0);
 	static char buf[256]; // keep this in the heap (need to survive during _beginthread)
 	char title[256];
-	string strbuf;
 	char errstr[256];
 	static VARPLOT messenger;
 
@@ -474,7 +585,7 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	bool alreadymade(false);
 	CSignals sig;
 	CWndDlg *cvdlg(NULL);
-	if (changed) FillupShowVar(); 
+	if (changed) Fillup(); 
 	int type, id;
 	vector<string> player;
 	vector<int> selectState;// This is the placeholder for select state used exclusively for mShowDlg, to use to get non-consecutively selected rows. Probably there are easier features already available if I was using .NET or C# 7/11/2016
@@ -491,12 +602,11 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 		lpnmitem = (LPNMITEMACTIVATE) lParam;
 		clickedRow = lpnmitem->iItem;
 		ListView_GetItemText(lpnmitem->hdr.hwndFrom, ListView_GetSelectionMark(lpnmitem->hdr.hwndFrom), 0, buf, 256);
-		strbuf = buf;
 		if (Sig.GetType()!=CSIG_CELL)
-			type=(sig=GetSig(strbuf)).GetType();
+			type=(sig=*cast.pEnv->GetSig(buf)).GetType();
 		else
 		{
-			res = sscanf(strbuf.c_str(), "{%d}", &id); // AUX is one-based. C++ is zero-based.
+			res = sscanf(buf, "{%d}", &id); // AUX is one-based. C++ is zero-based.
 			type=(sig=Sig.cell[id-1]).GetType(); // AUX is one-based. C++ is zero-based.
 		}
 		switch(type)
@@ -529,7 +639,7 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 				cvdlg = new CShowvarDlg;
 				cvdlg->hParent = this;
 				cvdlg->hDlg = CreateDialog (hInst, MAKEINTRESOURCE(IDD_SHOWVAR), hDlg, (DLGPROC)showvarDlg);
-				((CShowvarDlg*)cvdlg)->lvInit();
+//				((CShowvarDlg*)cvdlg)->lvInit();
 				((CShowvarDlg*)cvdlg)->Sig = sig; // This is necessary so that when a cell element is clicked recursively, only the proper sig within the cell is retrived.
 				if (cvdlg->hDlg!=NULL)
 				{
@@ -537,7 +647,7 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 					cvdlg->OnInitDialog((HWND)CELLVIEW, (LPARAM)buf);  // This go into CShowvarDlg::OnInitDialog
 				}
 			}
-			((CShowvarDlg*)cvdlg)->FillupShowVar(&sig);
+			((CShowvarDlg*)cvdlg)->Fillup(NULL, &sig);
 			break;
 		case CSIG_SCALAR:
 		case CSIG_AUDIO:
@@ -545,19 +655,17 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 		}
 		cvdlg->ShowWindow(SW_SHOW);
 		break;
-		break;
 	case LVN_KEYDOWN:
 		lvnkeydown = (LPNMLVKEYDOWN)lParam;
 		ListView_GetItemText(lvnkeydown->hdr.hwndFrom, ListView_GetSelectionMark(lvnkeydown->hdr.hwndFrom), 0, buf, 256);
 		if (strlen(buf)>0) 
 		{	
 			CGobj * hobj;
-			strbuf = buf;
 			switch(lvnkeydown->wVKey)
 			{
 			case VK_DELETE: // $$231109 4/25/2017
-				ClearVar(buf);
-				FillupShowVar();
+				cast.pEnv->ClearVar(buf);
+				Fillup();
 				break;
 			case VK_SPACE:
 				selectState.resize(ListView_GetItemCount(lvnkeydown->hdr.hwndFrom));
@@ -567,7 +675,7 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 					{
 						ListView_GetItemText(lvnkeydown->hdr.hwndFrom, k, 0, buf, 256);
 						player.push_back(buf);
-						GetSig(string(buf)).PlayArray(0, WM_APP+100, hDlg, &playbackblock, errstr);
+						cast.pEnv->GetSig(buf)->PlayArray(0, WM_APP+100, hDlg, &playbackblock, errstr);
 					}
 				}
 				break;
@@ -576,23 +684,23 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 				hobj = (CGobj *)GCF(&sig);
 				if (!hobj)
 				{
-					main.Sig = GetSig(strbuf);
-					if ( (main.Sig.GetType()==CSIG_AUDIO || main.Sig.GetType()==CSIG_VECTOR) && main.Sig.nSamples>0)
+					cast.Sig = *cast.pEnv->GetSig(buf);
+					if ( (cast.Sig.GetType()==CSIG_AUDIO || cast.Sig.GetType()==CSIG_VECTOR) && cast.Sig.nSamples>0)
 					{
 						CSignals gcf;
 						CRect rt(0, 0, 500, 310);
 						HANDLE fig = OpenGraffy(rt, buf, GetCurrentThreadId(), win7 ? NULL:hDlg, in); // due to z-order problem in Windows 7
 						HANDLE ax = AddAxis (fig, .08, .18, .86, .72);
 						CAxis *cax = static_cast<CAxis *>(ax);
-						if (main.Sig.GetType()==CSIG_VECTOR)
-							PlotCSignals(ax, main.Sig, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
+						if (cast.Sig.GetType()==CSIG_VECTOR)
+							PlotCSignals(ax, cast.Sig, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
 						else
-							PlotCSignals(ax, main.Sig, 0xff0000);
-						if (main.Sig.next)
-							PlotCSignals(ax, *main.Sig.next, RGB(200,0,50));
+							PlotCSignals(ax, cast.Sig, 0xff0000);
+						if (cast.Sig.next)
+							PlotCSignals(ax, *cast.Sig.next, RGB(200,0,50));
 						//update gcf here
 						GetFigID(in.fig, gcf);
-						main.SetTag("gcf", gcf);
+						cast.SetTag("gcf", gcf);
 						PostMessage(WM__PLOTDLG_CREATED, (WPARAM)buf, (LPARAM)&in);
 					}
 				}
@@ -694,16 +802,20 @@ void SetInsertLV(int type, HWND h1, HWND h2, UINT msg, LPARAM lParam)
 }
 
 
-void CShowvarDlg::FillupShowVar(CSignals *cell)
+void CShowvarDlg::Fillup(map<string,CSignals> *Tags, CSignals *cell)
 {
 	int res;
 	changed=false;
 	HWND h, hList;
 	HINSTANCE hModule = GetModuleHandle(NULL);
 	char buf[256], buf1[256], buf2[256];
+	if (Tags==NULL)
+		Tags = &cast.pEnv->Tags;
+	else
+		cast.pEnv->Tags = *Tags;
 
 	if ( (h = GetDlgItem(IDC_FS))!=NULL)
-		::SetWindowText(h, itoa(main.pEnv->Fs, buf, 10));
+		::SetWindowText(h, itoa(cast.pEnv->Fs, buf, 10));
 	if (cell!=NULL) 
 	{
 		::SetWindowText(GetDlgItem(IDC_STATIC_AUDIO), "Audio Signal cell elements");
@@ -736,21 +848,21 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 	}
 	CAstSigEnv *pe;
 	if (cell==NULL) // if it is main work space, grab it from global main
-		pe = main.pEnv;
+		pe = cast.pEnv;
 	else // else just make a temporary workspace for the input cell variable
 	{
 		char buff[256];
-		pe = new CAstSigEnv(3); // just to circumvent Fs > 1 requirement in CAstSigEnv::CAstSigEnv()
+//		pe = new CAstSigEnv(3); // just to circumvent Fs > 1 requirement in CAstSigEnv::CAstSigEnv()
 		for (size_t u=cell->cell.size(); u!=0; u--)
 		{
 			sprintf(buff, "{%d}", u);
-			pe->Tags[buff] = cell->cell[u-1];
+			(*Tags)[buff] = cell->cell[u-1];
 		}
 	}
 	int xc(0);
 	int k(0); // k is for column
 	string out, arrout, lenout;
-	for (map<string, CSignals>::iterator what=pe->Tags.begin(); what!=pe->Tags.end(); what++)
+	for (map<string, CSignals>::iterator what=Tags->begin(); what!=Tags->end(); what++)
 	{
 		CSignals tpp = what->second;
 		LvItem.iSubItem=0; //First item (InsertITEM)
@@ -885,12 +997,21 @@ void CShowvarDlg::FillupShowVar(CSignals *cell)
 			break;
 		case CSIG_COMPLEX:
 			if (tpp.nSamples==1)
-				sprintf(buf,"%g+i%g", tpp.buf[0], tpp.buf[1]);
+				if (tpp.buf[1]==1.)
+					sprintf(buf,"%g+i ", tpp.buf[0]);
+				else
+					sprintf(buf,"%g%+gi ", tpp.buf[0], tpp.buf[1]);
 			else
 			{
 				arrout="[";
 				for (int k=0; k<min(tpp.nSamples,10); k++)
-				{	sprintf(buf,"%g+i%g", tpp.buf[2*k], tpp.buf[2*k+1]); arrout += buf;		}
+				{	
+					if (tpp.buf[1]==1.)
+						sprintf(buf,"%g+i ", tpp.buf[2*k]);
+					else
+						sprintf(buf,"%g%+gi ", tpp.buf[2*k], tpp.buf[2*k+1]);
+					arrout += buf;		
+				}
 				if (tpp.nSamples>10) arrout += "...";
 				strcpy(buf, arrout.c_str());
 				buf[strlen(buf-1)-2] = ']';

@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <commctrl.h>  // includes the common control header
 #include "WndDlg0.h"
+#include "FileDlg.h" // from common/include
 #include "msgCrack.h"
 #include "graffy.h"
 #ifndef SIGPROC
@@ -8,6 +9,9 @@
 #endif
 
 #include <algorithm> // for remove_if
+
+#include "debugDlg.h"
+
 
 #define  WM__SOUND_EVENT  WM_APP+10
 
@@ -46,11 +50,12 @@ public:
 class CShowvarDlg : public CWndDlg
 {
 public:
+	HWND lastDebug;
 	HWND hList1, hList2;
 	LVCOLUMN LvCol; // Make Coluom struct for ListView
 	LVITEM LvItem;  // ListView Item struct
 	CSignals Sig;
-	CAstSig AstSig;
+	CAstSig cast;
 
 	vector<CWndDlg*> m_sheets;
 	map<string, DWORD> plotDlgThread;
@@ -79,11 +84,12 @@ public:
 	void OnSoundEvent(int index, int code);
 	void OnPlotDlgCreated(char *varname, GRAFWNDDLGSTRUCT *pin);
 	void OnPlotDlgDestroyed(char *varname);
-	void OnVarChanged(char *varname);
+	void OnVarChanged(char *varname, CSignals *sig);
 	void OnCloseFig(int figID);
 	void UpdateSheets();
-	void FillupShowVar(CSignals *cell=NULL);
+	void Fillup(map<string,CSignals> *Tags=NULL, CSignals *cell=NULL);
 	void lvInit();
+	void OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry);
 	HACCEL hAccel;
 	HANDLE curFig;
 	HANDLE *figwnd;

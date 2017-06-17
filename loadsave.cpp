@@ -3,6 +3,8 @@
 #include "sigproc.h"
 #endif
 
+#include "xcom.h"
+
 #define RETURN0IFINVALID(X) if ((X)<=0) {sprintf(errstr, "Error in ( "#X " )"); return 0;}
 #define RETURN0IFINVALID0(X) if ((X)!=0) {sprintf(errstr, "Error in ( "#X " )"); return 0;}
 #define RETURNWITHERRMSG(X) {sprintf(errstr, "Error in ( "#X " )"); return 0;}
@@ -10,13 +12,11 @@
 
 #define VERSIONSTR	"1.1"
 
-extern CAstSig main;
-
 void nonnulintervals(CSignals *psig, string &out);
 
-
-int save_axl(FILE *fp, const char * var, char *errstr)
+int xcom::save_axl(FILE *fp, const char * var, char *errstr)
 {
+	CAstSig *pabteg = *(vecast.end()-1);
 	char buf[256], fullmoduleName[256];
 	CSignals tp;
 	size_t sz;
@@ -28,8 +28,8 @@ int save_axl(FILE *fp, const char * var, char *errstr)
 	buf[4]=0;
 	sprintf(header, "AXL %s", buf+1); // the first character is buf is 'v'--we take from second char
 	map<string, CSignals>::iterator what;
-	what = main.pEnv->Tags.find(var);
-	if (what == main.pEnv->Tags.end())
+	what = pabteg->pEnv->Tags.find(var);
+	if (what == pabteg->pEnv->Tags.end())
 	{
 		sprintf(errstr, "Variable '%s' not found.", var);
 		return 0;
@@ -86,8 +86,9 @@ int save_axl(FILE *fp, const char * var, char *errstr)
 	return 1;
 }
 
-int load_axl(FILE *fp, char *errstr)
+int xcom::load_axl(FILE *fp, char *errstr)
 {
+	CAstSig *pabteg = *(vecast.end()-1);
 	unsigned char type;
 	char header[8], readbuf[256], varname[256]; // let's limit variable name to 255 characters.
 	size_t res, sz;
@@ -163,18 +164,18 @@ int load_axl(FILE *fp, char *errstr)
 			else
 			{
 				if (count>0) 
-					main.AddCell(varname, tp);
+					pabteg->AddCell(varname, tp);
 				if (count++==nElem)
 				{
-					tp = main.Sig;
-					main.Sig.cell.clear(); //reset here so that successive cell variables can be processed properly.
+					tp = pabteg->Sig;
+					pabteg->Sig.cell.clear(); //reset here so that successive cell variables can be processed properly.
 					break;
 				}
 				else
 					RETURN0IFINVALID( fread((void*)&type, 1,1,fp) )
 			}
 		} 
-		main.SetTag(varname, tp);
+		pabteg->SetTag(varname, tp);
 		wherenow = ftell(fp);
 		count=nElem=0; //reset here so that successive cell variables can be processed properly.
 	}

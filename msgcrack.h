@@ -50,6 +50,7 @@
     ((fn)((int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam)), 0L)
 #define HANDLE_WM_DESTROY(hwnd, wParam, lParam, fn) \
     ((fn)(), 0L)
+
 //#define HANDLE_WM_NOTIFY(hwnd, wParam, lParam, fn) \
 //    ((fn)(hwnd, (UINT)(wParam), lParam), 0L)
 /* The above is commented out because commctrl.h has the following definition
@@ -71,9 +72,9 @@ But it's not really useful anyway... WM_NOTIFY shouldn't be used in a cracker...
 #define HANDLE_WM_CLOSE_FIG(hwnd, wParam, lParam, fn) \
     ((fn)((int)(wParam)), 0L)
 
-/* void OnTimer(HWND hwnd, UINT id) */
+/* void OnTimer(UINT id) */
 #define HANDLE_WM_TIMER(hwnd, wParam, lParam, fn) \
-    ((fn)((hwnd), (UINT)(wParam)), 0L)
+    ((fn)((UINT)(wParam)), 0L)
 
 
 /* void OnShowWindow(BOOL fShow, UINT status) */

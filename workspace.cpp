@@ -4,14 +4,6 @@
 #endif
 extern CAstSig main;
 
-void EnumVariables(vector<string> &var)
-{
-	CAstSigEnv *pe = main.pEnv;
-	var.clear();
-	for (map<string, CSignals>::iterator what=pe->Tags.begin(); what!=pe->Tags.end(); what++)
-		var.push_back(what->first);
-}
-
 CSignals &GetSig(string varname)
 {
 	map<string, CSignals>::iterator what;

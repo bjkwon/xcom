@@ -4,10 +4,9 @@
 #ifndef SIGPROC
 #include "sigproc.h"
 #endif
-extern CAstSig main;
 extern double block;
 
-void closeXcom(SYSTEMTIME *lt, const char *AppPath);
+void closeXcom(const char *AppPath);
 
 BOOL CtrlHandler( DWORD fdwCtrlType ) 
 { 
@@ -17,7 +16,6 @@ BOOL CtrlHandler( DWORD fdwCtrlType )
  	_splitpath(fullmoduleName, drive, dir, NULL, NULL);
  	sprintf (AppPath, "%s%s", drive, dir);
 
-	string pathnotapppath;
   switch( fdwCtrlType ) 
   { 
     // This works properly only when ReadConsole or ReadConsoleInput or any other low level functions are used. Not for highlevel such as getchar
@@ -28,9 +26,7 @@ BOOL CtrlHandler( DWORD fdwCtrlType )
  
     // CTRL-CLOSE: confirm that the user wants to exit. 
     case CTRL_CLOSE_EVENT: 
-		SYSTEMTIME lt;
-		GetLocalTime(&lt);	
-		closeXcom(&lt, AppPath);
+		closeXcom(AppPath);
 		printf( "Ctrl-Close event. Exiting..\n" );
       return( TRUE ); 
  

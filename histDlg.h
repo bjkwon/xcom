@@ -20,6 +20,7 @@ public:
 
 	BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam);
 	void OnCommand(int idc, HWND hwndCtl, UINT event);
+	void OnTimer(UINT id);
 	void OnSize(UINT state, int cx, int cy);
 	void OnClose();
 	void OnDestroy();

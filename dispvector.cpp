@@ -8,17 +8,12 @@
 
 extern CWndDlg wnd;
 extern CShowvarDlg mShowDlg;
-extern CAstSig main;
 extern char udfpath[4096];
 extern void* soundplayPt;
 extern double block;
 extern vector<CWndDlg*> cellviewdlg;
 
-
 map<string, CRect> dlgpos;
-void FillupShowVar();
-void plotThread (PVOID var);
-CSignals &GetSig(string varname);
 
 BOOL CALLBACK vectorsheetDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 {

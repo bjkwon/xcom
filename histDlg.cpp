@@ -5,7 +5,8 @@
 
 extern CHistDlg mHistDlg;
 
-void computeandshow(char *AppPath, int code, char *buf);
+#define FILLHIST 100
+
 HWND CreateTT(HINSTANCE hInst, HWND hParent, RECT rt, char *string, int maxwidth=400);
 
 BOOL CALLBACK historyDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
@@ -15,9 +16,9 @@ BOOL CALLBACK historyDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 	chHANDLE_DLGMSG (hDlg, WM_INITDIALOG, mHistDlg.OnInitDialog);
 	chHANDLE_DLGMSG (hDlg, WM_SIZE, mHistDlg.OnSize);
 	chHANDLE_DLGMSG (hDlg, WM_CLOSE, mHistDlg.OnClose);
-
 	chHANDLE_DLGMSG (hDlg, WM_SHOWWINDOW, mHistDlg.OnShowWindow);
 	chHANDLE_DLGMSG (hDlg, WM_COMMAND, mHistDlg.OnCommand);
+	chHANDLE_DLGMSG (hDlg, WM_TIMER, mHistDlg.OnTimer);
 	case WM_NOTIFY:
 		mHistDlg.OnNotify(hDlg, (int)(wParam), lParam);
 		break;
@@ -40,8 +41,28 @@ CHistDlg::~CHistDlg(void)
 BOOL CHistDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
 	CWndDlg::OnInitDialog(hwndFocus, lParam);
-//	FILE *fpp = fopen("track.txt","at"); fprintf(fpp,"from histview, parent = %x\n", GetParent(hDlg)); fclose(fpp);
 	lvInit();
+	SetTimer(FILLHIST, 100, NULL);
+	return TRUE;
+}
+
+void CHistDlg::lvInit()
+{
+	LvItem.mask=LVIF_TEXT;   // Text Style
+	LvItem.cchTextMax = 256; // Max size of text
+	LvCol.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM;
+	hList = GetDlgItem(IDC_LISTHIST);
+	LRESULT res = ::SendMessage(hList,LVM_SETEXTENDEDLISTVIEWSTYLE,0,LVS_EX_FULLROWSELECT);
+	RECT rt;
+	char buf[256];
+	::GetClientRect (hList, &rt);
+	LoadString (hInst, IDS_HELP_HISTORY, buf, sizeof(buf));
+	CreateTT(hInst, hList, rt, buf, 270);
+}
+
+void CHistDlg::OnTimer(UINT id)
+{
+	KillTimer(id);
 	char buf[256];
 	DWORD dw = sizeof(buf);
 	GetComputerName(buf, &dw);
@@ -60,35 +81,8 @@ BOOL CHistDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 		fclose(fp);
 		size_t res2 = str2vect(lines, buf, "\r\n");
 		delete[] buf;
-		FillupHist(lines);
 	}
-	else
-	{
-		// Keep the following lines until I am sure that the initial screen anomaly is gone. 10/2/2016 bjk
-		//fp=fopen("hist_disappearing_track.txt","at");
-		//fprintf(fp,"history file open error.\n");
-		//fclose(fp);
-
-		//fpp = fopen("track.txt","at"); fprintf(fpp,"histview = %x\n", hDlg); fclose(fpp);
-		FillupHist(lines);
-	}
-	
-	return TRUE;
-}
-
-
-void CHistDlg::lvInit()
-{
-	LvItem.mask=LVIF_TEXT;   // Text Style
-	LvItem.cchTextMax = 256; // Max size of text
-	LvCol.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM;
-	hList = GetDlgItem(IDC_LISTHIST);
-	::SendMessage(hList,LVM_SETEXTENDEDLISTVIEWSTYLE,0,LVS_EX_FULLROWSELECT);
-	RECT rt;
-	char buf[256];
-	::GetClientRect (hList, &rt);
-	LoadString (hInst, IDS_HELP_HISTORY, buf, sizeof(buf));
-	CreateTT(hInst, hList, rt, buf, 270);
+	FillupHist(lines);
 }
 
 void CHistDlg::OnShowWindow(BOOL fShow, UINT status)
@@ -212,10 +206,11 @@ void CHistDlg::FillupHist(vector<string> in)
 {
 	char buf[256];
 	int width[]={400, };
+	LRESULT res;
 	for(int k = 0; k<1; k++)
 	{
 		LvCol.cx=width[k];
-		::SendMessage(hList, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+		res = ::SendMessage(hList, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
 	}
 	LvItem.iItem=0;
 	LvItem.iSubItem=0; //First item (InsertITEM)
@@ -226,10 +221,10 @@ void CHistDlg::FillupHist(vector<string> in)
 			strcpy(buf,in[k].c_str());
 			LvItem.pszText=buf;
 			LvItem.iItem=k;
-			SendDlgItemMessage(IDC_LISTHIST,LVM_INSERTITEM,0,(LPARAM)&LvItem);
+			res = SendDlgItemMessage(IDC_LISTHIST,LVM_INSERTITEM,0,(LPARAM)&LvItem);
 		}
 	}
-	ListView_Scroll(hList,0,ListView_GetItemCount(hList)*14);
+	res = ListView_Scroll(hList,0,ListView_GetItemCount(hList)*14);
 }
 void CHistDlg::AppendHist(char *in)
 {

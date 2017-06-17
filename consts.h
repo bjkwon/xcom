@@ -3,7 +3,7 @@
 
 #define HISTORY_FILENAME	"_history"
 
-#define LOGHISTORY(MSG) { FILE* __fp_ = fopen(mHistDlg.logfilename,"at"); if (__fp_) fprintf(__fp_,"%s\n", (MSG)); else MessageBox(NULL, "null fp", "", 0); fclose(__fp_); } 
+#define LOGHISTORY(MSG) { FILE* __fp_ = fopen(mHistDlg.logfilename,"at"); if (__fp_) fprintf(__fp_,"%s\n", (MSG)); else ::MessageBox(mHistDlg.hDlg, "null fp", "", 0); fclose(__fp_); } 
 
 #define PRINTF_WIN(MSG) WriteFile(hStdout, (MSG), strlen((MSG)), &dw, NULL);
 
@@ -22,6 +22,11 @@
 #define ID_SAVE		105 
 #define ID_LOAD		106
 #define ID_HISTORY	107
+#define ID_DEBUG_STEP 108
+#define ID_DEBUG_CONTINUE 109
+#define ID_DEBUG_EXIT 110
+#define ID_DEBUG 111
+
 
 
 #define DISPLAYLIMIT 10

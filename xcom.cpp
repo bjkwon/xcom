@@ -11,6 +11,7 @@
 #include "showvar.h"
 #include "histDlg.h"
 #include "consts.h"
+#include "xcom.h"
 
 //#pragma comment(linker,"\"/manifestdependency:type='win32' \
 //name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
@@ -25,23 +26,18 @@ uintptr_t hShowvarThread(NULL);
 uintptr_t hHistoryThread(NULL);
 char udfpath[4096];
 
+xcom mainSpace;
+
 CWndDlg wnd;
 CShowvarDlg mShowDlg;
 CHistDlg mHistDlg;
-CSignals tp;
-CAstSig main;
 void* soundplayPt;
 double block;
-
-int save_axl(FILE *fp, const char * var, char *errstr);
-int load_axl(FILE *fp, char *errstr);
 
 string typestring(int type);
 BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK historyDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL CtrlHandler( DWORD fdwCtrlType );
-LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam);
-void EnumVariables(vector<string> &var);
 void nonnulintervals(CSignal *psig, string &out, bool unit, bool clearout=false);
 
 void nonnulintervals(CSignal *psig, string &out, bool unit, bool clearout)
@@ -77,495 +73,6 @@ void print_node_struct (int layer, FILE* fp, string str, AstNode *node)
 	//if (node->LastChild!=NULL) 
 	//{	
 	//	print_node_struct(++layer, fp, "LastChild...\n", node->LastChild); --layer;}
-}
-
-int ClearVar(const char*var)
-{
-	CAstSigEnv *pe = main.pEnv;
-	if (var[0]==0) // clear all
-	{
-		pe->Tags.erase(pe->Tags.begin(), pe->Tags.end());
-		pe->UDFs.erase(pe->UDFs.begin(), pe->UDFs.end());
-		mShowDlg.changed=true;
-		return 1;
-	}
-	else
-	{
-		vector<string> vars;
-		size_t res = str2vect(vars, var, " ");
-		for (size_t k=0; k<res; k++)
-		{
-			for (map<string, CSignals>::iterator what=pe->Tags.begin(); what!=pe->Tags.end(); what++)
-			{
-				if (what->first==vars[k])
-				{
-					pe->Tags.erase(what);
-					mShowDlg.changed=true;
-					return 1;
-				}
-			}
-		}
-		for (size_t k=0; k<res; k++)
-		{
-			for (map<string, AstNode *>::iterator what=pe->UDFs.begin(); what!=pe->UDFs.end(); what++)
-			{
-				if (what->first==vars[k])
-				{
-					pe->UDFs.erase(what);
-					mShowDlg.changed=true;
-					break;
-				}
-			}
-		}
-		return 0;
-	}
-}
-
-
-unsigned int WINAPI histThread (PVOID var) 
-{
-	mHistDlg.hDlg = CreateDialog (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_HISTORY), GetConsoleWindow(), (DLGPROC)historyDlg);
-	if (mHistDlg.hDlg==NULL) {MessageBox(NULL, "History Dlgbox creation failed.","AUXLAB",0); return 0;}
-	RECT rc, rc2;
-	int res = GetWindowRect(GetConsoleWindow(), &rc);
-	rc2 = rc;
-	int width = rc.right-rc.left;
-	int height = rc.bottom-rc.top;
-	rc2.left = rc.right;
-	rc2.right = rc2.left + width/7*4;
-	rc2.bottom = rc.bottom;
-	rc2.top = rc2.bottom - height/5*4;
-	int res2 = MoveWindow(mHistDlg.hDlg, rc2.left, rc2.top, width/7*4, height/5*4, 1);
-
- //   SYSTEMTIME lt;
- //   GetLocalTime(&lt);	
-	//char buffer[256];
-	//sprintf(buffer, "[%02d/%02d/%4d, %02d:%02d:%02d] wndHistory.hDlg:%x, GetWindowRect=%d, MoveWindow=%d\n", lt.wMonth, lt.wDay, lt.wYear, lt.wHour, lt.wMinute, lt.wSecond, wndHistory.hDlg, res, res2);
-	//fp1=fopen("hist_disappearing_track.txt","at");
-	//fprintf(fp1,buffer);
-	//fclose(fp1);
-
-
-	MSG         msg ;
-	while (GetMessage (&msg, NULL, 0, 0))
-	{ 
-		if (msg.message==WM__ENDTHREAD) 
-			_endthreadex(17);
-		TranslateMessage (&msg) ;
-		DispatchMessage (&msg) ;
-	}
-	hHistoryThread=NULL;
-	return 0;
-}
-
-
-unsigned int WINAPI showvarThread (PVOID var) // Thread for variable show
-{
-	HINSTANCE hModule = GetModuleHandle(NULL);
-
-	mShowDlg.hDlg = CreateDialog (hModule, MAKEINTRESOURCE(IDD_SHOWVAR), GetConsoleWindow(), (DLGPROC)showvarDlg);
-	mShowDlg.hList1 = GetDlgItem(mShowDlg.hDlg , IDC_LIST1);
-	RECT rc;
-	GetWindowRect(GetConsoleWindow(), &rc);
-	int width = rc.right-rc.left;
-	int height = rc.bottom-rc.top;
-	RECT rc2(rc);
-	rc2.right = rc.left;
-	rc2.left = rc2.right - width/7*4+10;
-	rc2.bottom = rc.bottom;
-	rc2.top = rc2.bottom - height/5*4;
-
-	if (rc2.left<0) 
-	{
-		rc2.right -= rc2.left;
-		rc2.left = 0;
-		MoveWindow(GetConsoleWindow(), rc2.right, rc.top, width, height, 1);
-	}
-	MoveWindow(mShowDlg.hDlg, rc2.left, rc2.top, width/7*4, height/5*4, 1);
-//	SetFocus(GetConsoleWindow()); //This doesn't seem to work.
-//	SetForegroundWindow (GetConsoleWindow());
-	
-	MSG msg ;
-	HACCEL hAcc = LoadAccelerators (hModule, MAKEINTRESOURCE(IDR_XCOM_ACCEL));
-	while (GetMessage (&msg, NULL, 0, 0))
-	{ 
-		if (msg.message==WM__ENDTHREAD) 
-			_endthreadex(33);
-		if (!TranslateAccelerator (mShowDlg.hDlg, hAcc, &msg))
-		{
-			TranslateMessage (&msg) ;
-			DispatchMessage (&msg) ;
-		}
-	}
-	hShowvarThread=NULL;
-	return 0;
-}
-
-
-void out4console(const string varname, CSignals *psig, string &out)
-{
-	size_t count;
-	char buf[256];
-	string varname2;
-	if (psig->IsLogical()) 
-	{
-		out += "(logical) "; out += varname; 
-		for (int k=0; k< min (psig->nSamples, DISPLAYLIMIT*4); k++) 
-			{sprintf(buf,"%d ", psig->logbuf[k]); out+=buf;}
-		out +="\n";
-		return;
-	}
-	if (psig->GetType() != CSIG_CELL && varname.size()>0)	out += varname;
-	switch(psig->GetType())
-	{
-	case CSIG_NULL:
-		out += "NULL(0~";
-		sprintf(buf,"%gms)\n",psig->tmark);
-		out += buf;
-		break;
-	case CSIG_EMPTY:
-		out += "(empty)\n";
-		break;
-	case CSIG_AUDIO:
-		if (psig->next!=NULL) out += "audio(L) ";
-		else	out += "audio ";
-		nonnulintervals ((CSignal*)psig, out, true);
-		out +="\n";
-		if (psig->next!=NULL) {
-			out += "audio(R) ";
-			nonnulintervals (psig->next, out, true);
-			out +="\n";
-			}
-		break;
-	case CSIG_VECTOR:
-	case CSIG_SCALAR:
-	case CSIG_COMPLEX:
-		if (psig->GetType()==CSIG_COMPLEX)
-		{
-			for (int k=0; k< min (psig->nSamples, DISPLAYLIMIT); k++) 
-				{sprintf(buf,"%g %+gi  ", psig->buf[2*k], psig->buf[2*k+1]); out+=buf;}
-		}
-		else
-			for (int k=0; k< min (psig->nSamples, DISPLAYLIMIT); k++) 
-				{sprintf(buf,"%g  ", psig->buf[k]); out+=buf;}
-		
-		if (psig->nSamples>DISPLAYLIMIT) sprintf(buf,"....length=%d\n",psig->nSamples); 
-		else sprintf(buf,"\n");
-		out += buf;
-		if (psig->next)
-		{
-			for (int k=0; k<min(psig->next->nSamples,DISPLAYLIMIT); k++)
-			{	sprintf(buf,"%g  ", psig->next->buf[k]); out += buf;		}
-			if (psig->next->nSamples>DISPLAYLIMIT) sprintf(buf,"....length=%d\n",psig->nSamples); 
-			else sprintf(buf,"\n");
-			out += buf;
-		}
-		break;
-	case CSIG_STRING:
-		out += "\"" + psig->string() + "\"\n";
-		break;
-	case CSIG_CELL:
-		count = psig->cell.size();
-		for (size_t k=0; k<count; k++)
-		{
-			CSignals nocellplz(psig->cell[k]);
-			if (nocellplz.nSamples>0) 
-				nocellplz.cell.clear(); // This is necessary because, after [] or at, a celled-object will have trailing cell members, if available.
-			varname2 = varname + "{" + itoa((int)k+1,buf,10) + "} = ";
-			out4console(varname2, &nocellplz, out);
-		}
-		break;
-	}
-}
-
-#define	ISTHISSTR(STR) (!strcmp(pnode->str,STR))
-
-bool need2echo(AstNode *pnode)
-{
-	//if there are multiple statements on one line, 
-
-	//if node.str is one of the following, immediately return false
-	if (pnode->str)
-	{
-		if (ISTHISSTR("play")) return false;
-		if (ISTHISSTR("wavwrite")) return false;
-		if (ISTHISSTR("show")) return false;
-		if (ISTHISSTR("fprintf")) return false;
-		if (ISTHISSTR("fdelete")) return false;
-		if (ISTHISSTR("include")) return false;
-		if (ISTHISSTR("eval")) return false;
-		if (ISTHISSTR("eval")) return false;
-	}
-	return true;
-}
-
-void showarray(int code, CAstSig *main, AstNode *node)
-{
-	GRAFWNDDLGSTRUCT in;
-	string varname, out;
-	char buf[256], errstr[256];
-	if (node)
-		switch(node->type)
-		{
-		case T_IF:
-		case T_WHILE:
-		case T_SWITCH:
-		case T_FOR:
-		case T_SIGMA:
-			break;
-		case T_ID: // noncell_variable or cellvar{index}
-			if (!node->child) // this means noncell_variable 
-			{
-				varname = node->str; varname += " =\n";
-				out4console(varname, &main->Sig, out);
-				// notice that this break is inside the bracket 
-				break; // That means.... if cellvar{index}, passing through
-			}
-		case NODE_CALL: // variable(index)
-			if (need2echo(node))
-			{
-				tp = main->Sig;
-				main->SetTag("ans", tp);
-				out4console("ans =\n", &tp, out);
-			}
-			break;
-		case NODE_INITCELL: // cell definition
-			tp = main->Sig;
-			out4console(node->str, main->RetrieveTag(node->str), out);
-			mShowDlg.changed=true; 
-			mShowDlg.SendMessage(WM__VAR_CHANGED, (WPARAM)node->str);
-			break;
-		case NODE_BLOCK: // MULTIPLE statements.
-			{
-				string script(main->GetScript());
-				AstNode *p(node->child);
-				while (p && p->child)
-				{
-					if (p->type==T_IF || p->type==T_WHILE || p->type==T_SWITCH || p->type==T_FOR || p->type==T_SIGMA )
-						showarray (ID_DEFAULT, main, p);
-					else if (p->str)
-					{
-						size_t found = script.find(';', p->column-1);
-						if ( (p->next && (int)found > p->next->column) || // ; found but outside the current node 
-							found==string::npos) // ; not found
-						{
-							// if p->type is NODE_CALL, p->str shows the name of function call (so don't call Eval)
-							if (p->type != NODE_CALL && !main->RetrieveTag(p->str))
-								main->Eval(p);
-							if (p->type == NODE_CALL)
-							{
-								if (!p->next) // For function call, show only for the last one
-									showarray (ID_DEFAULT, main, p);
-							}
-							else
-								showarray (ID_DEFAULT, main, p);
-						}
-					}
-					p=p->next;
-				}
-			}
-			break;
-
-		default: // any statement
-			if (node->str)
-			{
-				map<string, CSignals>::iterator what;
-				what = main->pEnv->Tags.find(node->str);
-				if (what == main->pEnv->Tags.end())
-					tp = main->Sig;
-				else
-				{
-					tp = what->second;
-					if (tp.cell.size()>0) out4console(node->str, &tp, out);
-					else
-					{
-						varname = node->str; varname += " =\n";
-						out4console(varname, &tp, out);
-					}
-				}
-			}
-			else // Extraction. Expression, no variable
-			{
-				main->SetTag("ans", main->Sig);
-				out4console("ans =\n", &main->Sig, out);
-			}
-			break;
-		}
-	if (out.length()>0) printf("%s",out.c_str());
-
-	switch(code)
-	{
-	case ID_PLOT:
-		{
-			strcpy(buf, main->GetScript().c_str());
-			CSignals gcf;
-			CRect rt(0, 0, 500, 310);
-			HANDLE fig = OpenGraffy(rt, buf, GetCurrentThreadId(), mShowDlg.hDlg, in);
-			HANDLE ax = AddAxis (fig, .08, .18, .86, .72);
-			CAxis *cax = static_cast<CAxis *>(ax);
-			if (main->Sig.GetType()==CSIG_VECTOR)
-				PlotCSignals(ax, main->Sig, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
-			else
-				PlotCSignals(ax, main->Sig, 0xff0000);
-			if (main->Sig.next)
-				PlotCSignals(ax, *main->Sig.next, RGB(200,0,50));
-			CFigure *cfig = static_cast<CFigure *>(fig);
-
-		}
-		break;
-
-	case ID_PLAY:
-		TerminatePlay();
-	case ID_PLAYOVERLAP:
-		if (main->Sig.GetType()==CSIG_AUDIO)
-			main->Sig.PlayArray(0, WM_APP+100, GetConsoleWindow(), &playbackblock, errstr);
-		else if (tp.GetType()!=CSIG_SCALAR)
-			MessageBox(GetConsoleWindow(), "non audio signal cannot be played through audio output.", "error", MB_OK);
-		break;
-
-	case ID_PLAYLOOP:
-	case ID_PLAYENDLOOP:
-		if (main->Sig.GetType()==CSIG_AUDIO)
-		{
-			LoopPlay(code==ID_PLAYLOOP);
-			main->Sig.PlayArray(0, WM_APP+100, GetConsoleWindow(), &playbackblock, errstr, 1); // looping
-		}
-		else
-			MessageBox(GetConsoleWindow(), "non audio signal cannot be played through audio output.", "error", MB_OK);
-		break;
-
-	case ID_PLAYCONTINUE:
-		if (main->Sig.GetType()==CSIG_AUDIO)
-			main->Sig.PlayArrayNext(0, WM_APP+100, GetConsoleWindow(), &playbackblock, errstr);
-		else
-			MessageBox(GetConsoleWindow(), "non audio signal cannot be played through audio output.", "error", MB_OK);
-		break;
-
-	case ID_STOP:
-		TerminatePlay();
-		break;
-	}
-}
-
-void computeandshow(char *AppPath, int code, string input)
-{
-	static AstNode node;
-	static CSignals Sig;
-	string fname;
-	FILE *fp;
-	string savesuccess;
-	bool err(false);
-	char errstr[256], buffer[MAX_PATH], drive[64], dir[MAX_PATH], filename[MAX_PATH], ext[MAX_PATH];
-	size_t k(0), nItems;
-	int success(0);
-	vector<string> varlist, tar;
-	trim(input, " \t");
-	switch(code)
-	{
-	case ID_SHOWVAR:
-		mShowDlg.FillupShowVar();
-		mShowDlg.changed=false;
-		ShowWindow(mShowDlg.hDlg,SW_SHOW);
-		SetForegroundWindow (mShowDlg.hDlg); 
-		break;
-	case ID_HISTORY:
-		ShowWindow(mHistDlg.hDlg,SW_SHOW);
-		break;
-	case ID_SHOWFS:
-		printf("Sampling Rate=%d\n", main.pEnv->Fs);
-		break;
-	case ID_CLEARVAR:
-		nItems = str2vect(tar, input.c_str(), " ");
-		if (nItems>0) savesuccess = "Variable(s) cleared: ";
-		for (; k<nItems; k++)
-			if (ClearVar(tar[k].c_str()))
-				success++, sprintf(ext, "%s ", tar[k].c_str()), savesuccess+= ext;
-		if (success) printf("%s\n", savesuccess.c_str()), mShowDlg.FillupShowVar();
-		break;
-	case ID_LOAD:
-		fname = input;
-		fp = main.OpenFileInPath(fname, "axl");
-		if (fp)
-		{
-			if (load_axl(fp, errstr)==0) 
-				printf("File %s reading error----%s.\n", fname.c_str(), errstr);
-			fclose(fp);
-			mShowDlg.FillupShowVar();
-		}
-		else
-			printf("File %s not found in %s\n", string(input+".axl").c_str(), main.pEnv->AuxPath.c_str()); 
-		break;
-	case ID_SAVE:
-		if ((nItems = str2vect(tar, input.c_str(), " "))==0)
-		{	printf("#save (filename) var1 var2 var3...\n");		break;		}
-		_splitpath(tar[0].c_str(), drive, dir, filename, ext);
-		if (strlen(drive)+strlen(dir)==0) 
-			FulfillFile(buffer, AppPath, filename), fname=buffer;
-		else
-			fname = tar[0];
-		if (strlen(ext)==0) fname += ".axl";
-		else fname += ext;
-		if (nItems==1) // no variables indicated.. save all
-		{
-			EnumVariables(varlist);
-			size_t sz = varlist.size();
-			nItems = sz+1;
-			for (unsigned int k=1; sz>0 && k<nItems; k++)  
-				tar.push_back(varlist[k-1]);
-		}
-		if (fp = fopen(fname.c_str(), "wb")) 
-		{
-			printf("File %s saved with ...\n", fname.c_str());
-			for (unsigned int k=1; k<nItems; k++)
-			{
-				if (save_axl(fp, tar[k].c_str(), errstr)==0)
-				{
-					if (savesuccess.length()>0)
-						printf("Save error----%s.\n %s are saved OK.\n", errstr, savesuccess.c_str());
-					else
-						printf("Save error----%s.\n", errstr);
-					fclose(fp);
-					err = true;
-					break;
-				}
-				savesuccess += tar[k].c_str() + string(" ");
-				fclose(fp);
-				fp=fopen(fname.c_str(), "ab");
-			}
-		}
-		else
-			printf("File %s cannot be open for writing.\n", tar[0].c_str());
-		if (!err)	printf("%s \n", savesuccess.c_str());
-		fclose(fp);
-		break;
-	default:
-		if (code==ID_STOP)
-			showarray(code, NULL, NULL);
-		else if (input.size()>0)
-		{
-		try {
-			main.SetNewScript(input.c_str(),&node);
-			main.Sig = main.Compute();
-			//NODE_BLOCK: multiple statements on one line
-			//NODE_CALL : function call, include call, eval call
-			trimr(input, "\r\n");
-			string::iterator it=input.end()-1;
-			bool suppress ( *it==';' );
-			if ( node.type==NODE_BLOCK || !suppress)
-				showarray(code, &main, &node);
-			mShowDlg.FillupShowVar();
-			AstNode *p = (node.type==NODE_BLOCK) ? node.child : &node;
-			for (; p; p = p->next)
-				if (p->type!=T_ID && p->type!=T_NUMBER && p->type!=T_STRING) //For these node types, 100% chance that var was not changed---do not send WM__VAR_CHANGED
-					mShowDlg.SendMessage(WM__VAR_CHANGED,  (WPARAM) (p->str ? p->str : "ans"));
-			if (main.statusMsg.length()>0) cout << main.statusMsg.c_str() << endl;
-			main.statusMsg.clear();
-			}
-		catch (const char *errmsg) {
-			cout << "ERROR:" << errmsg << endl;	}
-		}
-	}
-	printf("AUX>");
 }
 
 WORD readINI(const char *fname, CRect *rtMain, CRect *rtShowDlg, CRect *rtHistDlg)
@@ -620,7 +127,524 @@ int readINI(const char *fname, char *estr, int &fs, double &_block, char *path)
 	return 1;
 }
 
-int writeINI(char *fname, char *estr, int fs, double _block, const char *path)
+unsigned int WINAPI histThread (PVOID var) 
+{
+	HWND hhh = GetConsoleWindow();
+	mHistDlg.hDlg = CreateDialog (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_HISTORY), GetConsoleWindow(), (DLGPROC)historyDlg);
+	if (mHistDlg.hDlg==NULL) {MessageBox(NULL, "History Dlgbox creation failed.","AUXLAB",0); return 0;}
+
+	ShowWindow(mHistDlg.hDlg, SW_SHOW);
+
+	CRect rt1, rt2, rt3;
+	int res = readINI(iniFile, &rt1, &rt2, &rt3);
+	if (res & 4)	
+		mHistDlg.MoveWindow(rt3);
+	else
+	{
+		RECT rc, rc2;
+		int res = GetWindowRect(GetConsoleWindow(), &rc);
+		rc2 = rc;
+		int width = rc.right-rc.left;
+		int height = rc.bottom-rc.top;
+		rc2.left = rc.right;
+		rc2.right = rc2.left + width/7*4;
+		rc2.bottom = rc.bottom;
+		rc2.top = rc2.bottom - height/5*4;
+		int res2 = MoveWindow(mHistDlg.hDlg, rc2.left, rc2.top, width/7*4, height/5*4, 1);
+	}
+
+	SetFocus(GetConsoleWindow()); //This seems to work.
+	SetForegroundWindow (GetConsoleWindow());
+
+
+ //   SYSTEMTIME lt;
+ //   GetLocalTime(&lt);	
+	//char buffer[256];
+	//sprintf(buffer, "[%02d/%02d/%4d, %02d:%02d:%02d] wndHistory.hDlg:%x, GetWindowRect=%d, MoveWindow=%d\n", lt.wMonth, lt.wDay, lt.wYear, lt.wHour, lt.wMinute, lt.wSecond, wndHistory.hDlg, res, res2);
+	//fp1=fopen("hist_disappearing_track.txt","at");
+	//fprintf(fp1,buffer);
+	//fclose(fp1);
+
+
+	MSG         msg ;
+	while (GetMessage (&msg, NULL, 0, 0))
+	{ 
+		if (msg.message==WM__ENDTHREAD) 
+			_endthreadex(17);
+		TranslateMessage (&msg) ;
+		DispatchMessage (&msg) ;
+	}
+	hHistoryThread=NULL;
+	return 0;
+}
+
+
+unsigned int WINAPI showvarThread (PVOID var) // Thread for variable show
+{
+	HINSTANCE hModule = GetModuleHandle(NULL);
+
+	mShowDlg.hDlg = CreateDialog (hModule, MAKEINTRESOURCE(IDD_SHOWVAR), GetConsoleWindow(), (DLGPROC)showvarDlg);
+	ShowWindow(mHistDlg.hDlg,SW_SHOW);
+	mShowDlg.hList1 = GetDlgItem(mShowDlg.hDlg , IDC_LIST1);
+	
+	CRect rt1, rt2, rt3;
+	int res = readINI(iniFile, &rt1, &rt2, &rt3);
+	if (res & 2)	
+		mShowDlg.MoveWindow(rt2);
+	else
+	{
+		RECT rc;
+		GetWindowRect(GetConsoleWindow(), &rc);
+		int width = rc.right-rc.left;
+		int height = rc.bottom-rc.top;
+		RECT rc2(rc);
+		rc2.right = rc.left;
+		rc2.left = rc2.right - width/7*4+10;
+		rc2.bottom = rc.bottom;
+		rc2.top = rc2.bottom - height/5*4;
+		if (rc2.left<0) 
+		{
+			rc2.right -= rc2.left;
+			rc2.left = 0;
+			MoveWindow(GetConsoleWindow(), rc2.right, rc.top, width, height, 1);
+		}
+		MoveWindow(mShowDlg.hDlg, rc2.left, rc2.top, width/7*4, height/5*4, 1);
+	}
+	SetFocus(GetConsoleWindow()); //This seems to work.
+	SetForegroundWindow (GetConsoleWindow());
+
+	MSG msg ;
+	HACCEL hAcc = LoadAccelerators (hModule, MAKEINTRESOURCE(IDR_XCOM_ACCEL));
+	while (GetMessage (&msg, NULL, 0, 0))
+	{ 
+		if (msg.message==WM__ENDTHREAD) 
+			_endthreadex(33);
+		if (!TranslateAccelerator (mShowDlg.hDlg, hAcc, &msg))
+		{
+			TranslateMessage (&msg) ;
+			DispatchMessage (&msg) ;
+		}
+	}
+	hShowvarThread=NULL;
+	return 0;
+}
+
+
+#define	ISTHISSTR(STR) (!strcmp(pnode->str,STR))
+
+bool need2echo(const AstNode *pnode)
+{
+	//if there are multiple statements on one line, 
+
+	//if node.str is one of the following, immediately return false
+	if (pnode->str)
+	{
+		if (ISTHISSTR("play")) return false;
+		if (ISTHISSTR("wavwrite")) return false;
+		if (ISTHISSTR("show")) return false;
+		if (ISTHISSTR("fprintf")) return false;
+		if (ISTHISSTR("fdelete")) return false;
+		if (ISTHISSTR("include")) return false;
+		if (ISTHISSTR("eval")) return false;
+		if (ISTHISSTR("eval")) return false;
+	}
+	return true;
+}
+
+xcom::xcom()
+{
+
+}
+
+xcom::~xcom()
+{
+
+}
+
+void xcom::out4console(string varname, CSignals *psig, string &out)
+{
+	size_t count;
+	char buf[256];
+	varname += " ";
+	string varname2;
+	if (psig->IsLogical()) 
+	{
+		out += "(logical) "; out += varname; 
+		for (int k=0; k< min (psig->nSamples, DISPLAYLIMIT*4); k++) 
+			{sprintf(buf,"%d ", psig->logbuf[k]); out+=buf;}
+		out +="\n";
+		return;
+	}
+	if (psig->GetType() != CSIG_CELL && varname.size()>0)	out += varname;
+	switch(psig->GetType())
+	{
+	case CSIG_NULL:
+		out += "NULL(0~";
+		sprintf(buf,"%gms)\n",psig->tmark);
+		out += buf;
+		break;
+	case CSIG_EMPTY:
+		out += "(empty)\n";
+		break;
+	case CSIG_AUDIO:
+		if (psig->next!=NULL) out += "audio(L) ";
+		else	out += "audio ";
+		nonnulintervals ((CSignal*)psig, out, true);
+		out +="\n";
+		if (psig->next!=NULL) {
+			out += "audio(R) ";
+			nonnulintervals (psig->next, out, true);
+			out +="\n";
+			}
+		break;
+	case CSIG_VECTOR:
+	case CSIG_SCALAR:
+	case CSIG_COMPLEX:
+		if (psig->GetType()==CSIG_COMPLEX)
+		{
+			for (int k=0; k< min (psig->nSamples, DISPLAYLIMIT); k++) 
+			{
+				if (psig->buf[2*k+1]==1.)
+					sprintf(buf,"%g+i ", psig->buf[2*k]), out+=buf;
+				else
+					sprintf(buf,"%g%+gi ", psig->buf[2*k], psig->buf[2*k+1]), out+=buf;
+			}
+		}
+		else
+			for (int k=0; k< min (psig->nSamples, DISPLAYLIMIT); k++) 
+				{sprintf(buf,"%g  ", psig->buf[k]); out+=buf;}
+		
+		if (psig->nSamples>DISPLAYLIMIT) sprintf(buf,"....length=%d\n",psig->nSamples); 
+		else sprintf(buf,"\n");
+		out += buf;
+		if (psig->next)
+		{
+			for (int k=0; k<min(psig->next->nSamples,DISPLAYLIMIT); k++)
+			{	sprintf(buf,"%g  ", psig->next->buf[k]); out += buf;		}
+			if (psig->next->nSamples>DISPLAYLIMIT) sprintf(buf,"....length=%d\n",psig->nSamples); 
+			else sprintf(buf,"\n");
+			out += buf;
+		}
+		break;
+	case CSIG_STRING:
+		out += "\"" + psig->string() + "\"\n";
+		break;
+	case CSIG_CELL:
+		count = psig->cell.size();
+		for (size_t k=0; k<count; k++)
+		{
+			CSignals nocellplz(psig->cell[k]);
+			if (nocellplz.nSamples>0) 
+				nocellplz.cell.clear(); // This is necessary because, after [] or at, a celled-object will have trailing cell members, if available.
+			varname2 = varname + "{" + itoa((int)k+1,buf,10) + "} = ";
+			out4console(varname2, &nocellplz, out);
+		}
+		break;
+	}
+}
+
+void xcom::showarray(int code, const AstNode *pnode)
+{
+	CAstSig *pabteg = *(vecast.end()-1);
+	CSignals tp;
+	AstNode *p;
+	GRAFWNDDLGSTRUCT in;
+	string varname, out;
+	char buf[256], errstr[256];
+	if (pnode)
+		switch(pnode->type)
+		{
+		case T_IF:
+		case T_WHILE:
+		case T_SWITCH:
+		case T_FOR:
+		case T_SIGMA:
+			break;
+		case T_ID: // noncell_variable or cellvar{index}
+			if (!pnode->child) // this means noncell_variable 
+			{
+				varname = pnode->str; varname += " =\n";
+				out4console(varname, &pabteg->GetTag(pnode->str), out);
+				// notice that this break is inside the bracket 
+				break; // That means.... if cellvar{index}, passing through
+			}
+		case NODE_CALL: // variable(index)
+			if (need2echo(pnode))
+			{
+				tp = pabteg->Sig;
+				pabteg->SetTag("ans", tp);
+				out4console("ans =\n", &tp, out);
+			}
+			break;
+		case NODE_INITCELL: // cell definition
+			mShowDlg.changed=true; 
+			if (pnode->str)
+			{
+				out4console(pnode->str, pabteg->RetrieveTag(pnode->str), out);
+				mShowDlg.SendMessage(WM__VAR_CHANGED, (WPARAM)pnode->str, (LPARAM)&pabteg->Sig);
+			}
+			else
+			{
+				pabteg->SetTag("ans", pabteg->Sig);
+				out4console("ans =\n", &pabteg->Sig, out);
+				mShowDlg.SendMessage(WM__VAR_CHANGED, (WPARAM)"ans", (LPARAM)&pabteg->Sig);
+			}
+			break;
+		case NODE_BLOCK: // MULTIPLE statements.
+			{
+				string script(pabteg->GetScript());
+				for (p = pnode->child; p && p->child; p=p->next)
+				{
+					if (p->type==T_IF || p->type==T_WHILE || p->type==T_SWITCH || p->type==T_FOR || p->type==T_SIGMA )
+						showarray (ID_DEFAULT, p);
+					else if (p->str)
+					{
+						size_t found = script.find(';', p->column-1);
+						if ( (p->next && (int)found > p->next->column) || // ; found but outside the current node 
+							found==string::npos) // ; not found
+						{
+							// if p->type is NODE_CALL, p->str shows the name of function call (so don't call Eval)
+							if (p->type != NODE_CALL && !pabteg->RetrieveTag(p->str))
+								pabteg->Eval(p);
+							if (p->type == NODE_CALL)
+							{
+								if (!p->next) // For function call, show only for the last one
+									showarray (ID_DEFAULT, p);
+							}
+							else
+								showarray (ID_DEFAULT, p);
+						}
+					}
+				}
+			}
+			break;
+
+		default: // any statement
+			if (pnode->str)
+			{
+				CSignals *tpp = pabteg->pEnv->GetSig(pnode->str);
+				if (!tpp)
+					tp = pabteg->Sig;
+				else
+				{
+					tp = *tpp;
+					if (tp.cell.size()>0) out4console(pnode->str, &tp, out);
+					else
+					{
+						varname = pnode->str; varname += " =\n";
+						out4console(varname, &tp, out);
+					}
+				}
+			}
+			else // Extraction. Expression, no variable
+			{
+				if (pnode->alt) // alt is used for multiple outputs ... (only UDF for now) 
+				{
+					for (p = pnode->alt->child; p; p=p->next)
+						showarray (ID_DEFAULT, p);
+				}
+				else
+				{
+					pabteg->SetTag("ans", pabteg->Sig);
+					out4console("ans =\n", &pabteg->Sig, out);
+				}
+			}
+			break;
+		}
+	if (out.length()>0) printf("%s",out.c_str());
+	switch(code)
+	{
+	case ID_PLOT:
+		{
+			strcpy(buf, pabteg->GetScript().c_str());
+			CSignals gcf;
+			CRect rt(0, 0, 500, 310);
+			HANDLE fig = OpenGraffy(rt, buf, GetCurrentThreadId(), mShowDlg.hDlg, in);
+			HANDLE ax = AddAxis (fig, .08, .18, .86, .72);
+			CAxis *cax = static_cast<CAxis *>(ax);
+			if (pabteg->Sig.GetType()==CSIG_VECTOR)
+				PlotCSignals(ax, pabteg->Sig, 0xff0000, '*', LineStyle_noline); // plot for VECTOR, no line and marker is * --> change if you'd like
+			else
+				PlotCSignals(ax, pabteg->Sig, 0xff0000);
+			if (pabteg->Sig.next)
+				PlotCSignals(ax, *pabteg->Sig.next, RGB(200,0,50));
+			CFigure *cfig = static_cast<CFigure *>(fig);
+
+		}
+		break;
+
+	case ID_PLAY:
+		TerminatePlay();
+	case ID_PLAYOVERLAP:
+		if (pabteg->Sig.GetType()==CSIG_AUDIO)
+			pabteg->Sig.PlayArray(0, WM_APP+100, GetConsoleWindow(), &playbackblock, errstr);
+		else if (tp.GetType()!=CSIG_SCALAR)
+			MessageBox(GetConsoleWindow(), "non audio signal cannot be played through audio output.", "error", MB_OK);
+		break;
+
+	case ID_PLAYLOOP:
+	case ID_PLAYENDLOOP:
+		if (pabteg->Sig.GetType()==CSIG_AUDIO)
+		{
+			LoopPlay(code==ID_PLAYLOOP);
+			pabteg->Sig.PlayArray(0, WM_APP+100, GetConsoleWindow(), &playbackblock, errstr, 1); // looping
+		}
+		else
+			MessageBox(GetConsoleWindow(), "non audio signal cannot be played through audio output.", "error", MB_OK);
+		break;
+
+	case ID_PLAYCONTINUE:
+		if (pabteg->Sig.GetType()==CSIG_AUDIO)
+			pabteg->Sig.PlayArrayNext(0, WM_APP+100, GetConsoleWindow(), &playbackblock, errstr);
+		else
+			MessageBox(GetConsoleWindow(), "non audio signal cannot be played through audio output.", "error", MB_OK);
+		break;
+
+	case ID_STOP:
+		TerminatePlay();
+		break;
+	}
+}
+
+int xcom::computeandshow(const char *AppPath, int code, string input, const AstNode *pCall)
+{
+	CAstSig *pabteg = *(vecast.end()-1);
+	string fname;
+	FILE *fp;
+	string savesuccess;
+	bool err(false);
+	char errstr[256], buffer[MAX_PATH], drive[64], dir[MAX_PATH], filename[MAX_PATH], ext[MAX_PATH];
+	size_t k(0), nItems;
+	int success(0);
+	vector<string> varlist, tar;
+	trim(input, " \t");
+	switch(code)
+	{
+	case ID_SHOWVAR:
+		mShowDlg.Fillup();
+		mShowDlg.changed=false;
+		ShowWindow(mShowDlg.hDlg,SW_SHOW);
+		SetForegroundWindow (mShowDlg.hDlg); 
+		break;
+	case ID_HISTORY:
+		ShowWindow(mHistDlg.hDlg,SW_SHOW);
+		break;
+	case ID_SHOWFS:
+		printf("Sampling Rate=%d\n", pabteg->pEnv->Fs);
+		break;
+	case ID_CLEARVAR:
+		nItems = str2vect(tar, input.c_str(), " ");
+		if (nItems>0) savesuccess = "Variable(s) cleared: ";
+		for (; k<nItems; k++)
+			if (pabteg->pEnv->ClearVar(tar[k].c_str()))
+				success++, sprintf(ext, "%s ", tar[k].c_str()), savesuccess+= ext;
+		if (success) printf("%s\n", savesuccess.c_str()), mShowDlg.Fillup(&pabteg->pEnv->Tags);
+		break;
+	case ID_LOAD:
+		fname = input;
+		fp = pabteg->OpenFileInPath(fname, "axl");
+		if (fp)
+		{
+			if (load_axl(fp, errstr)==0) 
+				printf("File %s reading error----%s.\n", fname.c_str(), errstr);
+			fclose(fp);
+			mShowDlg.Fillup(&pabteg->pEnv->Tags);
+		}
+		else
+			printf("File %s not found in %s\n", string(input+".axl").c_str(), pabteg->pEnv->AuxPath.c_str()); 
+		break;
+	case ID_SAVE:
+		if ((nItems = str2vect(tar, input.c_str(), " "))==0)
+		{	printf("#save (filename) var1 var2 var3...\n");		break;		}
+		_splitpath(tar[0].c_str(), drive, dir, filename, ext);
+		if (strlen(drive)+strlen(dir)==0) 
+			FulfillFile(buffer, AppPath, filename), fname=buffer;
+		else
+			fname = tar[0];
+		if (strlen(ext)==0) fname += ".axl";
+		else fname += ext;
+		if (nItems==1) // no variables indicated.. save all
+		{
+			pabteg->pEnv->EnumVar(varlist);
+			size_t sz = varlist.size();
+			nItems = sz+1;
+			for (unsigned int k=1; sz>0 && k<nItems; k++)  
+				tar.push_back(varlist[k-1]);
+		}
+		if (fp = fopen(fname.c_str(), "wb")) 
+		{
+			printf("File %s saved with ...\n", fname.c_str());
+			for (unsigned int k=1; k<nItems; k++)
+			{
+				if (save_axl(fp, tar[k].c_str(), errstr)==0)
+				{
+					if (savesuccess.length()>0)
+						printf("Save error----%s.\n %s are saved OK.\n", errstr, savesuccess.c_str());
+					else
+						printf("Save error----%s.\n", errstr);
+					fclose(fp);
+					err = true;
+					break;
+				}
+				savesuccess += tar[k].c_str() + string(" ");
+				fclose(fp);
+				fp=fopen(fname.c_str(), "ab");
+			}
+		}
+		else
+			printf("File %s cannot be open for writing.\n", tar[0].c_str());
+		if (!err)	printf("%s \n", savesuccess.c_str());
+		fclose(fp);
+		break;
+	default:
+		if (code==ID_STOP)
+			showarray(code, NULL);
+		else if (input.size()>0 || code==ID_DEBUG_CONTINUE)
+		{
+		try {
+			if (code==ID_DEBUG)
+			{
+				pabteg = *(vecast.end()-1);
+//				pabteg->CallUDF(NULL, NULL, *(vecnodeUDF.end()-1), true); // dbcontinue set
+			}
+			else
+			{
+				pabteg->SetNewScript(input.c_str());
+				pabteg->Sig = pabteg->Compute();
+			}
+			//NODE_BLOCK: multiple statements on one line
+			//NODE_CALL : function call, include call, eval call
+			trimr(input, "\r\n");
+			string::iterator it=input.end()-1;
+			bool suppress ( *it==';' );
+			if ( code!=ID_DEBUG && pabteg->pAst->type==NODE_BLOCK || !suppress)
+				showarray(code, pabteg->pAst);
+			mShowDlg.cast = pabteg;
+			mShowDlg.Fillup();
+			if(pabteg->pAst) 
+			{ // for non-debug cases, this is always true
+			AstNode *p = (pabteg->pAst->type==NODE_BLOCK) ? pabteg->pAst->child : pabteg->pAst;
+			for (; p; p = p->next)
+				if (p->type!=T_ID && p->type!=T_NUMBER && p->type!=T_STRING) //For these node types, 100% chance that var was not changed---do not send WM__VAR_CHANGED
+					mShowDlg.SendMessage(WM__VAR_CHANGED,  (WPARAM) (p->str ? p->str : "ans"));
+			}
+			if (pabteg->statusMsg.length()>0) cout << pabteg->statusMsg.c_str() << endl;
+			pabteg->statusMsg.clear();
+			}
+		catch (const char *errmsg) {
+			cout << "ERROR:" << errmsg << endl;	}
+		}
+	}
+	if (code==ID_DEBUG)
+		printf("\nK>");
+	else
+		printf("AUX>");
+	return pCall? 1:0;
+}
+
+
+
+int writeINI(const char *fname, char *estr, int fs, double _block, const char *path)
 {
 	char errStr[256];
 	if (!printfINI (errStr, fname, "SAMPLE RATE", "%d", fs)) {strcpy(estr, errStr); 	return 0;}
@@ -642,31 +666,38 @@ int writeINI(const char *fname, char *estr, CRect rtMain, CRect rtShowDlg, CRect
 	return 1;
 }
 
-void closeXcom(SYSTEMTIME *lt, const char *AppPath)
+void closeXcom(const char *AppPath)
 {
+
+	CAstSig cast = mainSpace.vecast.front();
+
 	//If CTRL_CLOSE_EVENT is pressed, you have 5 seconds (that's how Console app works in Windows.... Finish all cleanup work in this timeframe.
 	char estr[256], buffer[256];
-	const char *sss = main.GetPath();
-	const char* pt = strstr(main.GetPath(), AppPath); 
+	const char *sss = cast.GetPath();
+	const char* pt = strstr(cast.GetPath(), AppPath); 
 	string pathnotapppath;
 	size_t loc;
 	if (pt!=NULL)
 	{
-		pathnotapppath.append(main.GetPath(),  main.GetPath()-pt);
+		pathnotapppath.append(cast.GetPath(),  cast.GetPath()-pt);
 		string  str(pt + strlen(AppPath));
 		loc = str.find_first_not_of(';');
 		pathnotapppath.append(pt + strlen(AppPath)+loc);
 	}
 	else
-		pathnotapppath.append(main.GetPath());
-	int res = writeINI(iniFile, estr, main.pEnv->Fs, block, pathnotapppath.c_str());
+		pathnotapppath.append(cast.GetPath());
+	int res = writeINI(iniFile, estr, cast.pEnv->Fs, block, pathnotapppath.c_str());
 
 	CRect rt1, rt2, rt3;
 	GetWindowRect(GetConsoleWindow(), &rt1);
 	mShowDlg.GetWindowRect(rt2);
 	mHistDlg.GetWindowRect(rt3);
 	res = writeINI(iniFile, estr, rt1,rt2, rt3);
-	sprintf(buffer, "//\t[%02d/%02d/%4d, %02d:%02d:%02d] AUXLAB closes------", lt->wMonth, lt->wDay, lt->wYear, lt->wHour, lt->wMinute, lt->wSecond);
+
+	SYSTEMTIME lt;
+	GetLocalTime(&lt);	
+
+	sprintf(buffer, "//\t[%02d/%02d/%4d, %02d:%02d:%02d] AUXLAB closes------", lt.wMonth, lt.wDay, lt.wYear, lt.wHour, lt.wMinute, lt.wSecond);
 	LOGHISTORY(buffer);
 	if (hShowvarThread!=NULL) PostThreadMessage(GetWindowThreadProcessId(mShowDlg.hDlg, NULL), WM__ENDTHREAD, 0, 0);
 	if (hHistoryThread!=NULL) PostThreadMessage(GetWindowThreadProcessId(mHistDlg.hDlg, NULL), WM__ENDTHREAD, 0, 0);
@@ -755,37 +786,34 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	GetComputerName(buf, &dw);
 	sprintf(iniFile, "%s%s_%s.ini", AppPath, fname, buf);
 	res = readINI(iniFile, estr, fs, block, udfpath);
-	main.Reset(fs,""); //	main.Sig.Reset(fs); is wrong...
+	CAstSig cast(fs);
+//	cast.Reset(fs,""); //	mainSpace.cast.Sig.Reset(fs); is wrong...
 	addp = AppPath;
 	if (strlen(udfpath)>0 && udfpath[0]!=';') addp += ';';	
 	addp += udfpath;
-	main.SetPath(addp.c_str());
+	cast.SetPath(addp.c_str());
 
 	if ((hShowvarThread = _beginthreadex (NULL, 0, showvarThread, NULL, 0, NULL))==-1)
-		MessageBox(NULL, "Showvar Thread Creation Failed.", "AUXLAB main", 0);
+		::MessageBox (hr, "Showvar Thread Creation Failed.", "AUXLAB mainSpace", 0);
 	if ((hHistoryThread = _beginthreadex (NULL, 0, histThread, (void*)AppPath, 0, NULL))==-1)
-		MessageBox(NULL, "History Thread Creation Failed.", "AUXLAB main", 0);
+		::MessageBox (hr, "History Thread Creation Failed.", "AUXLAB mainSpace", 0);
 	
 	freopen( "CON", "w", stdout ) ;
 	freopen( "CON", "r", stdin ) ;
-
-	complex<double> x(1,-5), y(2,3);
-	complex<double> c = x*y;
 
 	HANDLE hStdin, hStdout; 
 	hStdout = GetStdHandle(STD_OUTPUT_HANDLE); 
 	hStdin = GetStdHandle(STD_INPUT_HANDLE); 
     DWORD fdwMode = ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_WINDOW_INPUT | ENABLE_INSERT_MODE | ENABLE_EXTENDED_FLAGS | ENABLE_QUICK_EDIT_MODE; 
 	SetConsoleMode(hStdin, fdwMode) ;
-	if (!SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlHandler, TRUE )) MessageBox (NULL, "Console control handler error", "AUXLAB", MB_OK);
+	if (!SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlHandler, TRUE )) ::MessageBox (hr, "Console control handler error", "AUXLAB", MB_OK);
 
-	ShowWindow(mHistDlg.hDlg, SW_SHOW);
 
 	printf("AUX>");
 
 	while (mShowDlg.hDlg==NULL) {
 		Sleep(100); 
-		mShowDlg.FillupShowVar();
+		mShowDlg.Fillup();
 		mShowDlg.changed=false;
 	}
 	ShowWindow(mShowDlg.hDlg,SW_SHOW);
@@ -795,10 +823,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	res = readINI(iniFile, &rt1, &rt2, &rt3);
 	if (res & 1)	
 		MoveWindow(hr, rt1.left, rt1.top, rt1.Width(), rt1.Height(), TRUE);
-	if (res & 2)	
-		mShowDlg.MoveWindow(rt2);
-	if (res & 4)	
-		mHistDlg.MoveWindow(rt3);
+
 	
 	SYSTEMTIME lt;
     GetLocalTime(&lt);	
@@ -810,11 +835,14 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 
 	LOGHISTORY(buffer2);
 
+	mainSpace.vecast.push_back(&cast);
+	mainSpace.vecnodeUDF.push_back(NULL);
+	
 	while(1) 
 	{
 		res = ReadConsole(hStdin, buf, 256, &dw, NULL);
 		char *ff = strpbrk(buf,"\r\n");
-		if (ff==NULL) { MessageBox(NULL, "Input to ReadConsole doesn't contain \\r\\n","Did you press Ctrl-C? It will not close the program.",0); continue;}
+		if (ff==NULL) { ::MessageBox(hr, "Input to ReadConsole doesn't contain \\r\\n","Did you press Ctrl-C? It will not close the program.", 0); continue;}
 		buf[ff-buf]=0;
 		LOGHISTORY(buf)
 		mHistDlg.AppendHist(buf);
@@ -842,10 +870,10 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 			code = ID_DEFAULT;
 		buff = buf;
 		if (code != ID_DEFAULT) buff += tar[0].length()+1;
-		computeandshow(AppPath, code, string (buff));
+		
+		mainSpace.computeandshow(AppPath, code, string (buff));
 	}
-    GetLocalTime(&lt);	
-	closeXcom(&lt,AppPath);
+	closeXcom(AppPath);
 	return 1;
 } 
 

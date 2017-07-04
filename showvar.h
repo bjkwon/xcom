@@ -12,6 +12,8 @@
 
 #include "debugDlg.h"
 
+int spyWM(HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam, char* const fname, vector<UINT> msg2excl, char* const tagstr);
+
 
 #define  WM__SOUND_EVENT  WM_APP+10
 
@@ -55,7 +57,7 @@ public:
 	LVCOLUMN LvCol; // Make Coluom struct for ListView
 	LVITEM LvItem;  // ListView Item struct
 	CSignals Sig;
-	CAstSig cast;
+	CAstSig *pcast;
 
 	vector<CWndDlg*> m_sheets;
 	map<string, DWORD> plotDlgThread;

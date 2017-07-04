@@ -28,8 +28,8 @@ int xcom::save_axl(FILE *fp, const char * var, char *errstr)
 	buf[4]=0;
 	sprintf(header, "AXL %s", buf+1); // the first character is buf is 'v'--we take from second char
 	map<string, CSignals>::iterator what;
-	what = pabteg->pEnv->Tags.find(var);
-	if (what == pabteg->pEnv->Tags.end())
+	what = pabteg->Tags.find(var);
+	if (what == pabteg->Tags.end())
 	{
 		sprintf(errstr, "Variable '%s' not found.", var);
 		return 0;

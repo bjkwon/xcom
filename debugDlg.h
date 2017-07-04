@@ -51,7 +51,7 @@ public:
 	void OnNotify(HWND hwnd, int idcc, LPARAM lParam);
 	LRESULT ProcessCustomDraw (NMHDR *lParam);
 	void lvInit();
-	void FillupHist(vector<string> in);
+	void FillupContent(vector<string> in);
 	int GetBPandUpdate();
 
 

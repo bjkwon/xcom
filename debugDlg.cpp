@@ -8,8 +8,10 @@
 #endif
 
 #include "xcom.h"
+#include "consts.h"
 
 extern xcom mainSpace;
+extern HANDLE hStdin, hStdout; 
 
 #define WM__DEBUG	WM_APP+3321 // do something later 6/4/2017 6pm
 
@@ -17,9 +19,12 @@ CDebugDlg mDebug;
 
 map<string, CDebugDlg*> dbmap;
 
+int spyWM(HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam, char* const fname, vector<UINT> msg2excl, char* const tagstr);
+
+
 BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
-	char buf0[256], buf[256], fname[256];
+	char buf0[256], fname[256];
 	vector<string> lines;
 	CREATE_CDebugDlg *ptransfer = (CREATE_CDebugDlg *)lParam;
 	strcpy(buf0, "[Debug] ");
@@ -50,12 +55,16 @@ BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	{
 		//Error handle
 	}
-	ptransfer->dbDlg->FillupHist(lines);
+	ptransfer->dbDlg->FillupContent(lines);
 	return TRUE;
 }
 
+extern vector<UINT> exc; //temp
+
 BOOL CALLBACK debugDlgProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 {
+//	spyWM(hDlg, umsg, wParam, lParam, "c:\\temp\\rec", exc, "[debugDlgProc]");
+
 	CDebugDlg *p_db(NULL); 
 	int line(-1);
 	for (map<string, CDebugDlg*>::iterator it = dbmap.begin(); it!=dbmap.end(); it++)
@@ -102,7 +111,6 @@ CDebugDlg::~CDebugDlg(void)
 void CDebugDlg::OnDebug(DEBUG_STATUS type, int line)
 {
 	int curLine;
-	LRESULT res;
 	switch(type)
 	{
 	case entering:
@@ -123,9 +131,7 @@ void CDebugDlg::OnDebug(DEBUG_STATUS type, int line)
 	}
 }
 
-
-
-void CDebugDlg::FillupHist(vector<string> in)
+void CDebugDlg::FillupContent(vector<string> in)
 {
 	char buf[256];
 	int width[]={50, 500, };
@@ -137,9 +143,6 @@ void CDebugDlg::FillupHist(vector<string> in)
 		LvCol.pszText=buf;
 		res = ::SendMessage(hList, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
 	}
-
-
-	LvItem.iItem=0;
 	for (LvItem.iItem=0; LvItem.iItem<(int)in.size(); LvItem.iItem++)
 	{
 		itoa(LvItem.iItem+1, buf, 10);
@@ -181,8 +184,10 @@ void CDebugDlg::OnSize(UINT state, int cx, int cy)
 
 void CDebugDlg::OnClose()
 {
-//	ShowWindow(SW_HIDE);
-	DestroyWindow();
+// Once debug window is created, it stays until the end of application (when closing, it becomes only hidden)
+	ShowWindow(SW_HIDE);
+
+	// Then bring it back ---ShowWindow(SW_SHOW); if it hits the breakpoint.... do this tomorrow 7/3/2017 bjk
 
 }
 
@@ -193,8 +198,27 @@ void CDebugDlg::OnDestroy()
 
 void CDebugDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 {
+	char buf[256];
+	DWORD dw;
+	int res, marked, lineChecked;
 	switch(idc)
 	{
+	case ID_F10: //from accelerator event should be 1
+		strcpy(buf, "#step ");
+	case ID_F5: //from accelerator event should be 1
+		if (idc==ID_F5) 
+			strcpy(buf, "#cont "), Beep(150,400);
+		for (int k=0; k<6;k++)
+			mainSpace.debug_command_frame[k].Event.KeyEvent.uChar.AsciiChar = buf[k];
+		res = WriteConsoleInput(hStdin, mainSpace.debug_command_frame, 6, &dw);
+		break;
+
+	case ID_F9: //from accelerator event should be 1
+		marked = ListView_GetSelectionMark(hList);
+		lineChecked = ListView_GetCheckState(hList, marked);
+		ListView_SetCheckState(hList, marked, lineChecked ? 0:1);
+		break;
+
 	case IDCANCEL:
 	//	OnClose();
 		break;
@@ -203,20 +227,20 @@ void CDebugDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 
 void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 {
-	int nItems, res(0), lineChecked;
 	static char buf[256];
+	string name;
 	LPNMHDR pnm = (LPNMHDR)lParam;
 	LPNMLISTVIEW pview = (LPNMLISTVIEW)lParam;
-	LPNMLVKEYDOWN lvnkeydown;
 	UINT code=pnm->code;
 	LPNMITEMACTIVATE lpnmitem;
-	static int clickedRow;
-	int marked;
+	vector<int>::iterator it;
+	int marked, clickedRow;
+	int res(0), lineChecked;
 	switch(code)
 	{
 	case NM_CLICK:
-		lpnmitem = (LPNMITEMACTIVATE) lParam;
-		clickedRow = lpnmitem->iItem;
+		//lpnmitem = (LPNMITEMACTIVATE) lParam;
+		//clickedRow = lpnmitem->iItem;
 		break;
 	case NM_DBLCLK:
 		lpnmitem = (LPNMITEMACTIVATE) lParam;
@@ -225,59 +249,50 @@ void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 		ListView_GetItemText(lpnmitem->hdr.hwndFrom, clickedRow, 0, buf, 256);
 		break;
 
-
 	case LVN_ITEMCHANGED:
 		lpnmitem = (LPNMITEMACTIVATE) lParam;
-//		if (lpnmitem->uNewState & LVIS_SELECTED)	Beep(1000,300);
 		clickedRow = lpnmitem->iItem;
+		if (clickedRow==0) {ListView_SetCheckState(hList, 0, 0); break;}
 		lineChecked = ListView_GetCheckState(hList, clickedRow);
-// #define LVIF_DI_SETITEM         0x1000
 		if (lpnmitem->uNewState>=LVIF_DI_SETITEM && !lpnmitem->uOldState) break;
 		if ( (lpnmitem->uNewState & LVIS_SELECTED) && !lineChecked) 	break;
+		it = find(breakpoint.begin(), breakpoint.end(), clickedRow+1);
+		if (lineChecked)
 		{
-			vector<int>::iterator it = find(breakpoint.begin(), breakpoint.end(), clickedRow+1);
-			if (lineChecked)
+			if (it==breakpoint.end())
 			{
-				if (it==breakpoint.end())
-				{
-					breakpoint.push_back(clickedRow+1);
-					sort(breakpoint.begin(), breakpoint.end());
-				}
+				breakpoint.push_back(clickedRow+1);
+				sort(breakpoint.begin(), breakpoint.end());
 			}
-			else
-			{
-				if (it!=breakpoint.end())
-					breakpoint.erase(it);
-			}
-			for (vector<CAstSig*>::iterator it=mainSpace.vecast.begin(); it!=mainSpace.vecast.end() && !breakpoint.empty(); it++)
-			{
-				CAstSig *past = *it;
+		}
+		else
+		{
+			if (it!=breakpoint.end())
+				breakpoint.erase(it);
+		}
+		for (vector<CAstSig*>::iterator it=mainSpace.vecast.begin(); it!=mainSpace.vecast.end(); it++)
+		{
+			CAstSig *past = *it;
+			if (breakpoint.empty())
+				past->pEnv->DebugBreaks.erase(udfname);
+			else 
 				past->pEnv->DebugBreaks[udfname] = breakpoint;
-			}
 		}
 		break;
 
-	case LVN_KEYDOWN:
-		lvnkeydown = (LPNMLVKEYDOWN)lParam;
-		switch(lvnkeydown->wVKey)
-		{
-		case VK_RETURN:
-			lpnmitem = (LPNMITEMACTIVATE) lParam;
-			marked = ListView_GetSelectionMark(lpnmitem->hdr.hwndFrom);
-			nItems = ListView_GetSelectedCount(lpnmitem->hdr.hwndFrom);
-			for (int k=marked; k<marked+nItems; k++)
-				ListView_GetItemText(lpnmitem->hdr.hwndFrom, k, 0, buf, 256);
-			SetFocus(GetConsoleWindow());
-			break;
-		case VK_F5:
-			break;
-		case VK_F9:
-			break;
-		case VK_F10:
-			break;
-		case VK_F11:
-			break;
-		}
+	//case LVN_KEYDOWN:
+	//	lvnkeydown = (LPNMLVKEYDOWN)lParam;
+	//	switch(lvnkeydown->wVKey)
+	//	{
+	//	case VK_RETURN:
+	//		lpnmitem = (LPNMITEMACTIVATE) lParam;
+	//		marked = ListView_GetSelectionMark(lpnmitem->hdr.hwndFrom);
+	//		nItems = ListView_GetSelectedCount(lpnmitem->hdr.hwndFrom);
+	//		for (int k=marked; k<marked+nItems; k++)
+	//			ListView_GetItemText(lpnmitem->hdr.hwndFrom, k, 0, buf, 256);
+	//		SetFocus(GetConsoleWindow());
+	//		break;
+	//	}
 	case NM_CUSTOMDRAW:
         ::SetWindowLongPtr(hwnd, DWLP_MSGRESULT, (LONG)ProcessCustomDraw(pnm));
         return;

@@ -7,27 +7,6 @@
 
 #define PRINTF_WIN(MSG) WriteFile(hStdout, (MSG), strlen((MSG)), &dw, NULL);
 
-#define ID_DEFAULT	99
-#define ID_ERR		-111
-#define ID_PLOT		100
-#define ID_PLAY		101
-#define ID_PLAYCONTINUE	111
-#define ID_PLAYOVERLAP 112
-#define ID_PLAYLOOP 113
-#define ID_PLAYENDLOOP 114
-#define ID_STOP		115
-#define ID_SHOWFS	102
-#define ID_SHOWVAR	103
-#define ID_CLEARVAR	104 
-#define ID_SAVE		105 
-#define ID_LOAD		106
-#define ID_HISTORY	107
-#define ID_DEBUG_STEP 108
-#define ID_DEBUG_CONTINUE 109
-#define ID_DEBUG_EXIT 110
-#define ID_DEBUG 111
-
-
 
 #define DISPLAYLIMIT 10
 #define TEXTLINEDISPLAYLIMIT 30

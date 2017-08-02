@@ -82,6 +82,20 @@ But it's not really useful anyway... WM_NOTIFY shouldn't be used in a cracker...
     ((fn)((BOOL)(wParam), (UINT)(lParam)), 0L)
 
 
+/* void OnGetMinMaxInfo(LPMINMAXINFO lpMinMaxInfo) */
+#define HANDLE_WM_GETMINMAXINFO(hwnd, wParam, lParam, fn) \
+    ((fn)((LPMINMAXINFO)(lParam)), 0L)
+
+
+#define FORWARD_WM_KEYDOWN(hwnd, vk, cRepeat, flags, fn) \
+    (void)(fn)((hwnd), WM_KEYDOWN, (WPARAM)(UINT)(vk), MAKELPARAM((cRepeat), (flags)))
+
+/* HWND Cls_OnNextDlgCtl(HWND hwnd, HWND hwndSetFocus, BOOL fNext) */
+#define HANDLE_WM_NEXTDLGCTL(hwnd, wParam, lParam, fn) \
+    (LRESULT)(UINT_PTR)(HWND)(fn)((hwnd), (HWND)(wParam), (BOOL)(lParam))
+#define FORWARD_WM_NEXTDLGCTL(hwnd, hwndSetFocus, fNext, fn) \
+    (HWND)(UINT_PTR)(fn)((hwnd), WM_NEXTDLGCTL, (WPARAM)(HWND)(hwndSetFocus), (LPARAM)(fNext))
+
 //void OnFlyConnected(HWND hDlg, char *hostname, char* ipa)
 #define HANDLE_WM_FL_CONNECTED(hwnd, wParam, lParam, fn) \
     ((fn)((char*)wParam, (char*)lParam), 0L)

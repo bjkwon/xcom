@@ -37,11 +37,8 @@ CHistDlg mHistDlg;
 void* soundplayPt;
 double block;
 
-extern uintptr_t hDebugThread2;
+extern uintptr_t hDebugThread;
 extern map<string, CDebugDlg*> dbmap;
-extern CDebugBaseDlg debugBase;
-unsigned int WINAPI debugThread2 (PVOID var) ;
-
 
 HANDLE hStdin, hStdout; 
 string typestring(int type);
@@ -85,7 +82,7 @@ void print_node_struct (int layer, FILE* fp, string str, AstNode *node)
 	//	print_node_struct(++layer, fp, "LastChild...\n", node->LastChild); --layer;}
 }
 
-WORD readINI(const char *fname, CRect *rtMain, CRect *rtShowDlg, CRect *rtHistDlg, CRect *rtDebugDlg)
+WORD readINI(const char *fname, CRect *rtMain, CRect *rtShowDlg, CRect *rtHistDlg)
 {
 	char errStr[256];
 	int tar[4];
@@ -114,14 +111,6 @@ WORD readINI(const char *fname, CRect *rtMain, CRect *rtShowDlg, CRect *rtHistDl
 		rtHistDlg->right = tar[2] + tar[0];
 		rtHistDlg->bottom = tar[3] + tar[1];
 		ret += 4;
-	}
-	if (ReadINI (errStr, fname, "DEBUG VIEW POS", strRead)>=0 && str2array (tar, 4, strRead.c_str(), " ")==4)
-	{
-		rtDebugDlg->left = tar[0];
-		rtDebugDlg->top = tar[1];
-		rtDebugDlg->right = tar[2] + tar[0];
-		rtDebugDlg->bottom = tar[3] + tar[1];
-		ret += 8;
 	}
 	return ret;
 }
@@ -196,22 +185,6 @@ void closeXcom(const char *AppPath)
 	mHistDlg.GetWindowRect(rt3);
 	res = writeINI(iniFile, estr, rt1,rt2, rt3);
 
-	string debugudfs;
-	for (map<string, CDebugDlg*>::iterator it=dbmap.begin(); it!=dbmap.end(); it++)
-	{
-		debugudfs += it->second->fullUDFpath; debugudfs += "\r\n";
-	}
-	if (debugudfs.size()>0)
-	{
-		if (!printfINI (estr, iniFile, "DEBUG VIEW", "%s", debugudfs.c_str())) strcpy(buffer, estr); 
-		map<string, CDebugDlg*>::iterator it=dbmap.begin(); 
-		GetWindowRect(it->second->hParent->hDlg, &rt1);
-		CString str;
-		str.Format("%d %d %d %d", rt1.left, rt1.top, rt1.Width(), rt1.Height());
-		if (!printfINI (estr, iniFile, "DEBUG VIEW POS", "%s", str.c_str())) {strcpy(buffer, estr);/*do something*/ }
-
-	}
-
 	SYSTEMTIME lt;
 	GetLocalTime(&lt);	
 	vector<string> in;
@@ -220,7 +193,7 @@ void closeXcom(const char *AppPath)
 	mainSpace.LogHistory(in);
 	if (hShowvarThread!=NULL) PostThreadMessage(GetWindowThreadProcessId(mShowDlg.hDlg, NULL), WM__ENDTHREAD, 0, 0);
 	if (hHistoryThread!=NULL) PostThreadMessage(GetWindowThreadProcessId(mHistDlg.hDlg, NULL), WM__ENDTHREAD, 0, 0);
-	if (hDebugThread2!=NULL)
+	if (hDebugThread!=NULL)
 	{
 		map<string, CDebugDlg*>::iterator it=dbmap.begin(); 
 		if (it!=dbmap.end())
@@ -241,8 +214,8 @@ unsigned int WINAPI histThread (PVOID var)
 
 	ShowWindow(mHistDlg.hDlg, SW_SHOW);
 
-	CRect rt1, rt2, rt3, rt4;
-	int res = readINI(iniFile, &rt1, &rt2, &rt3, &rt4);
+	CRect rt1, rt2, rt3;
+	int res = readINI(iniFile, &rt1, &rt2, &rt3);
 	if (res & 4)	
 		mHistDlg.MoveWindow(rt3);
 	else
@@ -282,8 +255,8 @@ unsigned int WINAPI showvarThread (PVOID var) // Thread for variable show
 	ShowWindow(mHistDlg.hDlg,SW_SHOW);
 	mShowDlg.hList1 = GetDlgItem(mShowDlg.hDlg , IDC_LIST1);
 	
-	CRect rt1, rt2, rt3, rt4;
-	int res = readINI(iniFile, &rt1, &rt2, &rt3, &rt4);
+	CRect rt1, rt2, rt3;
+	int res = readINI(iniFile, &rt1, &rt2, &rt3);
 	if (res & 2)	
 		mShowDlg.MoveWindow(rt2);
 	else
@@ -305,16 +278,6 @@ unsigned int WINAPI showvarThread (PVOID var) // Thread for variable show
 		}
 		MoveWindow(mShowDlg.hDlg, rc2.left, rc2.top, width/7*4, height/5*4, 1);
 	}
-	if (res & 8)
-	{
-		if ((hDebugThread2 = _beginthreadex (NULL, 0, debugThread2, (void*)&rt4, 0, NULL))==-1)
-			MessageBox (GetConsoleWindow(), "Debug Thread Creation Failed.", 0, 0);
-		else
-		{
-			debugBase.MoveWindow(rt4);
-		}
-	}
-
 	SetFocus(GetConsoleWindow()); //This seems to work.
 	SetForegroundWindow (GetConsoleWindow());
 
@@ -425,7 +388,7 @@ void xcom::out4console(string varname, CSignals *psig, string &out)
 		if (psig->next!=NULL) out += "audio(L) ";
 		else	out += "audio ";
 		nonnulintervals ((CSignal*)psig, out, true);
-		out +="\n ";
+		out +="\n";
 		if (psig->next!=NULL) {
 			out += "audio(R) ";
 			nonnulintervals (psig->next, out, true);
@@ -717,9 +680,7 @@ bool xcom::isdebugcommand(INPUT_RECORD *in, int len)
 		readbuf[p]=0;
 		if (!strcmp(readbuf, "#cont")) return true;
 		if (!strcmp(readbuf, "#step")) return true;
-		if (!strcmp(readbuf, "#stin")) return true;
-		if (!strcmp(readbuf, "#abor")) return true;
-		if (!strcmp(readbuf, "#r2cu")) return true;
+		if (!strcmp(readbuf, "#exit")) return true;
 	}
 	return false;
 }
@@ -743,7 +704,7 @@ int paste(char *buf)
 	strcpy(buf, buff);
 	GlobalUnlock((HGLOBAL)buff);
 	res = CloseClipboard();
-	return (int)len;
+	return len;
 }
 
 void xcom::getinput(char* readbuffer)
@@ -763,7 +724,7 @@ void xcom::getinput(char* readbuffer)
 	size_t num; // total count of chracters typed in
 	size_t offset; // how many characters shifted left from the last char
 	size_t off; // how much shift of the current cursor is from the command prompt
-	int line, len, code;
+	int line, len;
 	CONSOLE_SCREEN_BUFFER_INFO coninfo0, coninfo;
 	GetConsoleScreenBufferInfo(hStdout, &coninfo0);
 	bool loop(true), returndown(false);
@@ -792,7 +753,7 @@ void xcom::getinput(char* readbuffer)
 					if (returndown) // ready to execute the line
 					{
 						loop=false;
-						buf1[0] = 0, histOffset = 0; 
+						buf1[0] = histOffset = 0; 
 						buf[num] = '\n';
 						strcpy(readbuffer, buf);
 						WriteConsole (hStdout, strcpy(buf1, "\r\n"), 2, &dw2, NULL);
@@ -801,17 +762,40 @@ void xcom::getinput(char* readbuffer)
 					}
 					else
 					{ // something wrong...
+
 					}
+
 				}
 				else
 					returndown = true;
 			}
 		}
+//		fprintf(fpp, "dw=%d\n", dw);
 		for (UINT k=0; k<dw; k++)
 		{
+//			if ( in[k].EventType != KEY_EVENT ) 
+//			{	fprintf(fpp, "dw=%d, event=%d\n", dw, in[k].EventType); continue;}
 			if (CONTROLKEY) 
-				controlkeydown = in[k].Event.KeyEvent.bKeyDown;
-			code = in[k].Event.KeyEvent.uChar.AsciiChar;
+			{
+					controlkeydown = in[k].Event.KeyEvent.bKeyDown;
+//					fprintf(fpp, "dw=%d, k=%d, Control keydown=%d\n", dw, k, controlkeydown);
+			}
+
+			int code = in[k].Event.KeyEvent.uChar.AsciiChar;
+/*			if ( in[k].EventType != KEY_EVENT ) 
+				fprintf(fpp, "%d Not a key event\n", dw);
+			else if  ( (code>=0x30 && code <=0x5a) || (code>=0x5f && code <=0x6f) || (code>=0x30 && code <=0x5a) )
+				fprintf(fpp, "controlkeydown=%d, %d %d %d(0x%x) %c 0x%x\n", controlkeydown, k, in[k].Event.KeyEvent.bKeyDown, in[k].Event.KeyEvent.wVirtualKeyCode, in[k].Event.KeyEvent.wVirtualKeyCode, in[k].Event.KeyEvent.uChar.AsciiChar, in[k].Event.KeyEvent.dwControlKeyState);
+			else
+				fprintf(fpp, "controlkeydown=%d, %d %d %d(0x%x) (symbol) 0x%x\n", controlkeydown, k, in[k].Event.KeyEvent.bKeyDown, in[k].Event.KeyEvent.wVirtualKeyCode, in[k].Event.KeyEvent.wVirtualKeyCode, in[k].Event.KeyEvent.dwControlKeyState);
+*/
+			if (CONTROLKEY) 
+			{
+					controlkeydown = in[k].Event.KeyEvent.bKeyDown;
+//					fprintf(fpp, "dw=%d, k=%d, Control keydown=%d\n", dw, k, controlkeydown);
+			}
+
+
 			if (in[k].Event.KeyEvent.wVirtualKeyCode==0x56 && (in[k].Event.KeyEvent.dwControlKeyState & (LEFT_CTRL_PRESSED+RIGHT_CTRL_PRESSED))
 				 && in[k].Event.KeyEvent.bKeyDown ) //control-V 
 				num += paste(buf+num);
@@ -825,11 +809,13 @@ void xcom::getinput(char* readbuffer)
 				case VK_RETURN:
 					// Is this actual return or enter key pressing, or transport of a block?
 					// For pasting, i.e., control-v---> keep in the loop; otherwise, get out of the loop
+		//			fprintf(fpp, "controlkeydown=%d, entering VK_RETURN\n", controlkeydown);
 					if (!controlkeydown) 
 						loop=false;
-					buf1[0] = 0, histOffset = 0; 
+					buf1[0] = histOffset = 0; 
 					buf[num++] = '\n';
 					strcpy(readbuffer, buf);
+		//			fprintf(fpp, "%s...loop=%d", readbuffer, loop);
 					WriteConsole (hStdout, "\r\n", 2, &dw2, NULL);
 					break;
 				case VK_CONTROL:
@@ -843,7 +829,7 @@ void xcom::getinput(char* readbuffer)
 				case VK_LEFT:
 					if (!(num-offset)) break;
 					if (in[k].Event.KeyEvent.dwControlKeyState & LEFT_CTRL_PRESSED || in[k].Event.KeyEvent.dwControlKeyState & RIGHT_CTRL_PRESSED)
-						delta = (SHORT)( strlen(buf) - ctrlshiftleft(buf, offset) - offset );
+						delta = strlen(buf) - ctrlshiftleft(buf, offset) - offset;
 					else
 						delta = 1;
 					for (int pp=0; pp<delta; pp++)
@@ -950,7 +936,10 @@ void xcom::getinput(char* readbuffer)
 					SetConsoleCursorPosition (hStdout, coninfo.dwCursorPosition);
 					break;
 				default:
-					if (!read || (in[k].Event.KeyEvent.wVirtualKeyCode>=VK_F1 && in[k].Event.KeyEvent.wVirtualKeyCode<=VK_F24) ) break;
+//					fprintf(fpp, "controlkeydown=%d, dw=%d, k=%d, other key down =  %c\n", controlkeydown, dw, k, read);
+
+
+					if (in[k].Event.KeyEvent.wVirtualKeyCode>=VK_F1 && in[k].Event.KeyEvent.wVirtualKeyCode<=VK_F24) break;
 					//default is replace mode (not insert mode)
 					// if cursor is in the middle
 					if (showscreen) res = WriteConsole (hStdout, &read, 1, &dw2, NULL);
@@ -967,7 +956,7 @@ void xcom::getinput(char* readbuffer)
 							if (showscreen) res = WriteConsole (hStdout, &buf1, strlen(buf1), &dw2, NULL);
 							GetConsoleScreenBufferInfo(hStdout, &coninfo);
 							coninfo.dwCursorPosition.X -= dw2;
-							if (showscreen) SetConsoleCursorPosition (hStdout, coninfo.dwCursorPosition);
+							SetConsoleCursorPosition (hStdout, coninfo.dwCursorPosition);
 						}
 						else
 							buf[num++-offset] = read;
@@ -979,6 +968,9 @@ void xcom::getinput(char* readbuffer)
 			}
 		}
 	}
+
+	char *ff = strpbrk(readbuffer,"\r\n");
+//	if (ff!=NULL)	readbuffer[ff-readbuffer]=0;
 	if (!debugcommand(readbuffer))
 	{
 		// if a block input is given (i.e., control-V), each line is separately saved/logged.
@@ -991,23 +983,15 @@ void xcom::getinput(char* readbuffer)
 			comid++;
 		}
 	}
-	else
-		SetConsoleCursorPosition (hStdout, coninfo0.dwCursorPosition);
-//		GetConsoleScreenBufferInfo(hStdout, &coninfo0);
 }
 	
 bool xcom::debugcommand(const char* cmd)
 {
-	char buf[2048];
-	strcpy_s(buf, 2048, cmd);
-	char *ff = strpbrk(buf,"\r\n");
-	if (ff) ff[0]=0;
-	if (!strcmp(buf,"#step")) return true;
-	if (!strcmp(buf,"#cont")) return true;
-	if (!strcmp(buf,"#exit")) return true;
-	if (!strcmp(buf,"#stin")) return true;
-	if (!strcmp(buf,"#abor")) return true;
-	if (!strcmp(buf,"#r2cu")) return true;
+	string input(cmd);
+	if (input=="#step") return true;
+	if (input=="#cont") return true;
+	if (input=="#exit") return true;
+	if (input=="#stin") return true;
 	return false;
 }
 
@@ -1015,9 +999,23 @@ bool xcom::debugcommand(const char* cmd)
 void xcom::console()
 {
 	char buf[4096]={0};
+//	FILE* fpp = fopen("keystork","wt");
+//	fclose(fpp);
 	while(1) 
 	{
+			//if (!IsClipboardFormatAvailable(CF_TEXT)) 
+			//	MessageBox(NULL, "CLipboard not available", 0, 0);
+			//int res = OpenClipboard(NULL);
+			//HANDLE hglb = GetClipboardData(CF_TEXT); 
+
+			//LPVOID lptstr = GlobalLock(hglb);
+
+//		FILE* fpp = fopen("keystork","at");
 		getinput(buf); // this is a holding line.
+
+//		fclose(fpp);
+
+		
 		if (mainSpace.computeandshow(buf)==-1) break;
 	}
 }
@@ -1053,7 +1051,7 @@ int xcom::computeandshow(const char *in, const AstNode *pCall)
 			showarray(pabteg->pAst);
 		}
 	catch (const char *errmsg) {
-		if (strstr(errmsg,"debug_abort"))
+		if (strstr(errmsg,"debug_exit"))
 			cleanup_debug();
 		else
 			cout << "ERROR:" << errmsg << endl;	 
@@ -1077,6 +1075,7 @@ int xcom::computeandshow(const char *in, const AstNode *pCall)
 				buf[0]=0;
 			else
 				strcpy(buf, input.substr(input.find(tar[1])).c_str());
+
 	
 		if (hook(ast, HookName, buf)==-1)		
 				return -1;	}
@@ -1255,12 +1254,6 @@ int xcom::hook(CAstSig *ast, string HookName, const char* argstr)
 	return 0;
 }
 
-bool xcom::dbmapfind(const char* udfname)
-{
-	map<string, CDebugDlg*>::iterator it;
-	return (it = dbmap.find(udfname))!=dbmap.end(); 
-}
-
 void xcom::LogHistory(vector<string> input)
 {
 	FILE* logFP = fopen(mHistDlg.logfilename,"at"); 
@@ -1294,11 +1287,11 @@ void xcom::ShowWS_CommandPrompt(CAstSig *pcast)
 	}
 	if (pcast->statusMsg.length()>0) cout << pcast->statusMsg.c_str() << endl;
 	pcast->statusMsg.clear();
-	if (vecast.size()==1)
-		printf("AUX>");
-	else if (pcast->dstatus==null)
+//	if ( (pcast->pAst && pcast->pAst->type == NODE_BLOCK) || pcast->pnodeLast)
+	if ( pcast->pnodeLast )
 		printf("K>");
-	// if fromDebugger is -1, that means debugging shortcut key message, e.g., #step, #cont,... and don't show the prompt
+	else
+		printf("AUX>");
 }
 
 size_t xcom::ReadHist()
@@ -1474,8 +1467,8 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	ShowWindow(mShowDlg.hDlg,SW_SHOW);
 	ShowWindow(mHistDlg.hDlg,SW_SHOW);
 
-	CRect rt1, rt2, rt3, rt4;
-	res = readINI(iniFile, &rt1, &rt2, &rt3, &rt4);
+	CRect rt1, rt2, rt3;
+	res = readINI(iniFile, &rt1, &rt2, &rt3);
 	if (res & 1)	
 		MoveWindow(hr, rt1.left, rt1.top, rt1.Width(), rt1.Height(), TRUE);
 	

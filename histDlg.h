@@ -30,5 +30,5 @@ public:
 	void UpdateSheets();
 	void lvInit();
 	void FillupHist(vector<string> in);
-	void AppendHist(char *in);
+	void AppendHist(vector<string> input);
 };

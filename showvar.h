@@ -9,8 +9,9 @@
 #endif
 
 #include <algorithm> // for remove_if
-
+#include "TabCtrl.h"
 #include "debugDlg.h"
+
 
 int spyWM(HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam, char* const fname, vector<UINT> msg2excl, char* const tagstr);
 
@@ -52,7 +53,7 @@ public:
 class CShowvarDlg : public CWndDlg
 {
 public:
-	HWND lastDebug;
+	CDebugDlg *lastDebug;
 	HWND hList1, hList2;
 	LVCOLUMN LvCol; // Make Coluom struct for ListView
 	LVITEM LvItem;  // ListView Item struct

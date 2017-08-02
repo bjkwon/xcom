@@ -1,3 +1,6 @@
+#ifndef DEBUG_DLG
+#define DEBUG_DLG
+
 #include <windows.h>
 #include <commctrl.h>  // includes the common control header
 #include "WndDlg0.h"
@@ -8,14 +11,6 @@
 #include "sigproc.h"
 #endif
 
-enum DEBUG_STATUS
-{
-    entering,
-    progress,
-	stepping,
-    exiting,
-};
-
 using namespace std;
 
 #define WM_DEBUG_CLOSE	WM_APP+9821
@@ -23,22 +18,23 @@ using namespace std;
 class CDebugDlg : public CWndDlg
 {
 public:
-
 	string udfname;
-	CAstSig *pabcast;
+	char fullUDFpath[256];
+	CAstSig *pAst;
 	int lastLine;
 	vector<int> breakpoint;
-	bool inDebug;
 	HWND hList;
 	LVCOLUMN LvCol; // Make Coluom struct for ListView
 	LVITEM LvItem;  // ListView Item struct
 
 	HFONT eFont;
+	int fontsize;
+	LOGFONT      lf;
 
 	CDebugDlg(void);
 	~CDebugDlg(void);
 
-//	BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam);
+	BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam);
 	void OnCommand(int idc, HWND hwndCtl, UINT event);
 	void OnSysCommand(UINT cmd, int x, int y);
 	void OnSize(UINT state, int cx, int cy);
@@ -48,14 +44,17 @@ public:
 	HBRUSH OnCtlColorStatic(HDC hdc, HWND hCtrl, int id);
 	HBRUSH OnCtlColorEdit(HDC hdc, HWND hCtrl, int id);
 	HBRUSH OnCtlColor(HDC hdc, HWND hCtrl, int id);
+	int GetCurrentCursor();
+	int SetSize();
 	void OnNotify(HWND hwnd, int idcc, LPARAM lParam);
+	bool cannotbeBP(int line);
 	LRESULT ProcessCustomDraw (NMHDR *lParam);
 	void lvInit();
 	void FillupContent(vector<string> in);
 	int GetBPandUpdate();
 
 
-	void OnDebug(DEBUG_STATUS type, int line);
+	void Debug(DEBUG_STATUS type, int line=-1);
 
 };
 
@@ -66,3 +65,28 @@ struct CREATE_CDebugDlg
 	char fullfilename[256];
 };
 
+
+class CDebugBaseDlg : public CWndDlg
+{
+public:
+
+	HWND hTab;
+	map<int,string> udfname;
+	map<int,HWND> dlgPage_hwnd;
+
+	CDebugBaseDlg(void);
+	~CDebugBaseDlg(void);
+
+	void open_tab_with_UDF(const char *fullname, int shownID);
+	BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam);
+	void OnCommand(int idc, HWND hwndCtl, UINT event);
+	void OnSysCommand(UINT cmd, int x, int y);
+	void OnSize(UINT state, int cx, int cy);
+	void OnClose();
+	void OnDestroy();
+	void OnShowWindow(BOOL fShow, UINT status);
+	void OnNotify(HWND hwnd, int idcc, NMHDR *pnm);
+	int FileOpen(char *fullfilename);
+};
+
+#endif // DEBUG_DLG

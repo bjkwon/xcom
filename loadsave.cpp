@@ -28,10 +28,10 @@ int xcom::save_axl(FILE *fp, const char * var, char *errstr)
 	buf[4]=0;
 	sprintf(header, "AXL %s", buf+1); // the first character is buf is 'v'--we take from second char
 	map<string, CSignals>::iterator what;
-	what = pabteg->Tags.find(var);
-	if (what == pabteg->Tags.end())
+	what = pabteg->Vars.find(var);
+	if (what == pabteg->Vars.end())
 	{
-		sprintf(errstr, "Variable '%s' not found.", var);
+		sprintf(errstr, "Variable '%s' invalid or not found.", var);
 		return 0;
 	}
 	else
@@ -175,7 +175,7 @@ int xcom::load_axl(FILE *fp, char *errstr)
 					RETURN0IFINVALID( fread((void*)&type, 1,1,fp) )
 			}
 		} 
-		pabteg->SetTag(varname, tp);
+		pabteg->SetVar(varname, tp);
 		wherenow = ftell(fp);
 		count=nElem=0; //reset here so that successive cell variables can be processed properly.
 	}

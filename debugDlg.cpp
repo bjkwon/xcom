@@ -2,6 +2,10 @@
 #include "debugDlg.h"
 #include "resource1.h"
 #include "audfret.h"
+#include "FileDlg.h" // from common/include
+#include "showvar.h"
+#include "Objbase.h"
+#include "Shobjidl.h"
 
 #ifndef SIGPROC
 #include "sigproc.h"
@@ -9,34 +13,205 @@
 
 #include "xcom.h"
 #include "consts.h"
+#include "TabCtrl.h"
 
 extern xcom mainSpace;
 extern HANDLE hStdin, hStdout; 
+CFileDlg fileDlg2;
+extern CShowvarDlg mShowDlg;
+extern uintptr_t hDebugThread2;
+extern char iniFile[256];
 
-#define WM__DEBUG	WM_APP+3321 // do something later 6/4/2017 6pm
+CTabControl mTab;
 
-CDebugDlg mDebug;
+CDebugBaseDlg debugBase;
+vector<CDebugDlg *> debugVct; // Debug dialogboxes, which appear on the tab control
 
 map<string, CDebugDlg*> dbmap;
+char fullfname[_MAX_PATH], fname[_MAX_FNAME + _MAX_EXT];
 
 int spyWM(HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam, char* const fname, vector<UINT> msg2excl, char* const tagstr);
 
+BOOL CALLBACK DebugBaseProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK TabPage_DlgProc(HWND hwndDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
+unsigned int WINAPI debugThread (PVOID var);
 
-BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam)
+#define WM__NEWDEBUGDLG	WM_APP+0x2000
+
+extern vector<UINT> exc; //temp
+
+int getID4hDlg(HWND hDlg)
 {
+	size_t k(0);
+	for (vector<CDebugDlg*>::iterator it=debugVct.begin(); it!=debugVct.end(); it++, k++) 
+	{ if (hDlg==(*it)->hDlg)   return (int)k; }
+	return -1;
+}
+
+#define m_THIS  debugVct[id]
+
+extern vector<UINT> exc;
+
+BOOL CALLBACK debugDlgProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
+{
+	if (exc.size()==0)
+	{
+		exc.push_back(WM_NCHITTEST);
+		exc.push_back(WM_SETCURSOR);
+		exc.push_back(WM_MOUSEMOVE);
+		exc.push_back(WM_NCMOUSEMOVE);
+		exc.push_back(WM_WINDOWPOSCHANGING);
+		exc.push_back(WM_WINDOWPOSCHANGED);
+		exc.push_back(WM_CTLCOLORDLG);
+		exc.push_back(WM_NCPAINT);
+		exc.push_back(WM_GETMINMAXINFO);
+		exc.push_back(WM_MOVE);
+		exc.push_back(WM_MOVING);
+		exc.push_back(WM_NCMOUSEMOVE);
+		exc.push_back(WM_ERASEBKGND);
+	}
+	
+//	spyWM(hDlg, umsg, wParam, lParam, "c:\\temp\\rec", exc, "[debugDlgProc]");
+
+	CDebugDlg *p_db(NULL); 
+	int line(-1);
+	for (map<string, CDebugDlg*>::iterator it = dbmap.begin(); it!=dbmap.end(); it++)
+		if (hDlg == it->second->hDlg) p_db = it->second;
+	if (!p_db && umsg!=WM_INITDIALOG) return FALSE;
+
+	if (umsg==WM_INITDIALOG)
+	{
+		//FILE *fp = fopen("c:\\temp\\rec","wt");
+		//fprintf(fp, "NM_CLICK=%4x\n", NM_CLICK);
+		//fprintf(fp, "NM_DBLCLK=%4x\n", NM_DBLCLK);
+		//fprintf(fp, "NM_SETFOCUS=%4x\n", NM_SETFOCUS);
+		//fprintf(fp, "NM_KILLFOCUS=%4x\n", NM_KILLFOCUS);
+		//fprintf(fp, "NM_NCHITTEST=%4x\n", NM_NCHITTEST);
+		//fprintf(fp, "NM_KEYDOWN=%4x\n", NM_KEYDOWN);
+		//fprintf(fp, "LVN_ITEMCHANGED=%4x\n", LVN_ITEMCHANGED);
+		//fprintf(fp, "NM_CUSTOMDRAW=%4x\n", NM_CUSTOMDRAW);
+		//fclose(fp);
+		((CREATE_CDebugDlg*)lParam)->dbDlg->hDlg = hDlg;
+		return ((CREATE_CDebugDlg*)lParam)->dbDlg->OnInitDialog((HWND)wParam, lParam);
+	}
+	switch (umsg)
+	{
+	chHANDLE_DLGMSG (hDlg, WM_SIZE, p_db->OnSize);
+	chHANDLE_DLGMSG (hDlg, WM_CLOSE, p_db->OnClose);
+	chHANDLE_DLGMSG (hDlg, WM_DESTROY, p_db->OnDestroy);
+	chHANDLE_DLGMSG (hDlg, WM_SHOWWINDOW, p_db->OnShowWindow);
+	chHANDLE_DLGMSG (hDlg, WM_COMMAND, p_db->OnCommand);
+
+	case WM_NOTIFY:
+		p_db->OnNotify(hDlg, (int)(wParam), lParam);
+		//{
+		//	FILE *fp = fopen("c:\\temp\\rec","at");
+		//	fprintf(fp, "\t\t\t\tcode=%4x\n", ((LPNMHDR)lParam)->code);
+		//	fclose(fp);
+		//}
+		break;
+	default:
+		return FALSE;
+	}
+	return TRUE;
+}
+
+unsigned int WINAPI debugThread2 (PVOID var) 
+{
+	CRect *prt = (CRect *)var;
+	FILE*fp=fopen("c:\\temp\\windows_log.txt","wt");
+	fclose(fp);
+
+	HWND hBase = CreateDialogParam (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DEBUG2), mShowDlg.hDlg, (DLGPROC)DebugBaseProc, (LPARAM)&debugBase);
+	int res=debugBase.MoveWindow(*prt);
+	MSG         msg ;
+	HACCEL hAccDebug = LoadAccelerators (GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_ACCEL_DEBUG));
+	while (GetMessage (&msg, NULL, 0, 0))
+	{ 
+//		spyWM(msg.hwnd, msg.message, msg.wParam, msg.lParam, "c:\\temp\\rec", exc, "[debugThread2-msg loop]");
+		if (msg.message==WM__ENDTHREAD) 
+			break;
+		else if (msg.message==WM__NEWDEBUGDLG)
+		{
+			if (!msg.wParam)
+			{
+		//		fileDlg2.FileOpenDlg(fullfname, fname, "AUX UDF file (*.AUX)\0*.aux\0", "aux");
+				debugBase.FileOpen(fullfname);
+			}
+			else
+				strcpy(fullfname, (char*)msg.wParam);
+			if (strlen(fullfname)>0)
+				debugBase.open_tab_with_UDF(fullfname, -1);
+		}
+		else
+		{
+			int res(0);
+					if (msg.message==0x100)
+					{res++; res--;}
+			int iSel = TabCtrl_GetCurSel(debugBase.hTab);
+			for (map<string, CDebugDlg*>::iterator it=dbmap.begin(); it!=dbmap.end(); it++)
+			{
+				if (it->second->hDlg == mTab.hCur)
+				{	
+					res = TranslateAccelerator (mTab.hCur, hAccDebug, &msg); 
+					if (res)						
+					{res++; res--;}
+				
+					break; }
+			}
+			if (!res && !IsDialogMessage(msg.hwnd, &msg))
+			{
+				TranslateMessage (&msg) ;
+				DispatchMessage (&msg) ;
+			}
+		}
+	}
+	//cleanup -- this may not have enough time during exiting from closeXcom
+	for (vector<CDebugDlg *>::iterator it=debugVct.begin(); it!=debugVct.end(); it++)
+	{
+		DeleteObject((*it)->eFont);
+		(*it)->DestroyWindow();
+		delete *it;
+	}
+	return 0;
+}
+
+
+CDebugDlg::CDebugDlg(void)
+{
+
+}
+
+CDebugDlg::~CDebugDlg(void)
+{
+//	dbmap.erase(udfname);
+}
+
+BOOL CDebugDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
+{
+	CWndDlg::OnInitDialog(hwndFocus, lParam);
+
 	char buf0[256], fname[256];
 	vector<string> lines;
 	CREATE_CDebugDlg *ptransfer = (CREATE_CDebugDlg *)lParam;
 	strcpy(buf0, "[Debug] ");
 	strcat(buf0, ptransfer->fullfilename);
-	SetWindowText(GetParent(hwndFocus), buf0);
+	::SetWindowText(GetParent(hwndFocus), buf0);
 	_splitpath(ptransfer->fullfilename, NULL, NULL, fname, buf0);
-	dbmap[fname] = ptransfer->dbDlg;
+	dbmap[fname] = this;
+	strcpy(fullUDFpath, ptransfer->fullfilename);
 
-	ptransfer->dbDlg->udfname = fname;
+	udfname = fname;
 
-	ptransfer->dbDlg->hDlg = GetParent(hwndFocus);
-	ptransfer->dbDlg->lvInit();
+//	ptransfer->dbDlg->hDlg = GetParent(hwndFocus); // not needed since tabcontrol is used.
+	lvInit();
+
+	LvItem.mask=LVIF_TEXT;   // Text Style
+	LvItem.cchTextMax = 256; // Max size of text
+	LvCol.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM;
+	hList = GetDlgItem(IDC_LISTDEBUG);
+	LRESULT res = ::SendMessage(hList,LVM_SETEXTENDEDLISTVIEWSTYLE,0, /*LVS_SHOWSELALWAYS | */ LVS_EX_FULLROWSELECT|LVS_EX_CHECKBOXES);
+
 
 	FILE *fp = fopen(ptransfer->fullfilename, "rt");
 	if (fp!=NULL)
@@ -47,7 +222,7 @@ BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam)
 		char *buf = new char[filesize+1];
 		size_t res = fread(buf, 1, (size_t)filesize, fp);
 		buf[res]=0;
-		fclose(fp);
+		res = fclose(fp);
 		size_t res2 = str2vect(lines, buf, "\r\n");
 		delete[] buf;
 	}
@@ -55,78 +230,49 @@ BOOL OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	{
 		//Error handle
 	}
-	ptransfer->dbDlg->FillupContent(lines);
+	FillupContent(lines);
+	fontsize = 10;
+	HDC hdc = GetDC(NULL);
+	lf.lfHeight = -MulDiv(fontsize, GetDeviceCaps(hdc, LOGPIXELSY), 72);
+	ReleaseDC(NULL, hdc);
+	strcpy(lf.lfFaceName, "Courier New");
+	eFont = CreateFont(lf.lfHeight,0,0,0, FW_MEDIUM, FALSE, FALSE, 0,
+		ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, 
+		FIXED_PITCH | FF_MODERN, lf.lfFaceName);
 	return TRUE;
 }
 
-extern vector<UINT> exc; //temp
-
-BOOL CALLBACK debugDlgProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
+void CDebugDlg::Debug(DEBUG_STATUS type, int line)
 {
-//	spyWM(hDlg, umsg, wParam, lParam, "c:\\temp\\rec", exc, "[debugDlgProc]");
-
-	CDebugDlg *p_db(NULL); 
-	int line(-1);
-	for (map<string, CDebugDlg*>::iterator it = dbmap.begin(); it!=dbmap.end(); it++)
-		if (hDlg == it->second->hDlg) p_db = it->second;
-	if (!p_db && umsg!=WM_INITDIALOG) return FALSE;
-	switch (umsg)
-	{
-	chHANDLE_DLGMSG (hDlg, WM_INITDIALOG, OnInitDialog);
-	chHANDLE_DLGMSG (hDlg, WM_SIZE, p_db->OnSize);
-	chHANDLE_DLGMSG (hDlg, WM_CLOSE, p_db->OnClose);
-	chHANDLE_DLGMSG (hDlg, WM_DESTROY, p_db->OnDestroy);
-	chHANDLE_DLGMSG (hDlg, WM_SHOWWINDOW, p_db->OnShowWindow);
-	chHANDLE_DLGMSG (hDlg, WM_COMMAND, p_db->OnCommand);
-	case WM_NOTIFY:
-		p_db->OnNotify(hDlg, (int)(wParam), lParam);
-		break;
-	case WM__DEBUG:
-		if (wParam) p_db->inDebug = true;
-		else p_db->inDebug = false;
-		if ((DEBUG_STATUS)wParam==entering) 
-			p_db->pabcast = (CAstSig *)lParam;
-		else if ((DEBUG_STATUS)wParam==stepping) 
-			line = (int)lParam;
-		p_db->OnDebug((DEBUG_STATUS)wParam, line);
-
-		break;
-	default:
-		return FALSE;
-	}
-	return TRUE;
-}
-
-CDebugDlg::CDebugDlg(void)
-:inDebug(false)
-{
-
-}
-
-CDebugDlg::~CDebugDlg(void)
-{
-//	dbmap.erase(udfname);
-}
-
-void CDebugDlg::OnDebug(DEBUG_STATUS type, int line)
-{
-	int curLine;
+	char buf[256];
+	int curLine, nLines;
 	switch(type)
 	{
 	case entering:
-		break;
+		ListView_SetItemState (hList, -1,  0, 0x000F);
 	case progress:
-		ListView_SetItemState (hList, (lastLine = pabcast->endLine)-1,  LVIS_FOCUSED | LVIS_SELECTED, 0x000F);
+		ListView_SetItemState (hList, (lastLine = pAst->nextBreakPoint)-1,  LVIS_FOCUSED | LVIS_SELECTED, 0x000F);
 		SetFocus(hList);
 		break;
 	case stepping:
 		ListView_SetItemState (hList, lastLine-1,  0, 0x000F);
+		nLines = (int)::SendMessage(hList, LVM_GETITEMCOUNT, 0,0); 
+		if (nLines<line)
+		{
+			LvItem.iSubItem=0; //First item (InsertITEM)
+			LvItem.pszText="";
+			::SendMessage(hList, LVM_INSERTITEM, 0, (LPARAM)&LvItem);
+			strcpy(buf, "Going back to the last scope");
+			LvItem.iSubItem++; //Second column (SetITEM)
+			::SendMessage(hList, LVM_SETITEM, 0, (LPARAM)&LvItem);
+		}
 		ListView_SetItemState (hList, (lastLine = line)-1,  LVIS_FOCUSED | LVIS_SELECTED, 0x000F);
 		SetFocus(hList);
 		curLine = ListView_SetSelectionMark(hList, line-1);
 		break;
 	case exiting:
 		ListView_SetItemState (hList, lastLine-1,  0, 0x000F);
+		mainSpace.vecast.pop_back();
 		break;
 	}
 }
@@ -134,14 +280,15 @@ void CDebugDlg::OnDebug(DEBUG_STATUS type, int line)
 void CDebugDlg::FillupContent(vector<string> in)
 {
 	char buf[256];
-	int width[]={50, 500, };
+	int width[]={50, -1, };
 	LRESULT res;
 	for(int k = 0; k<2; k++)
 	{
 		LvCol.cx=width[k];
 		LoadString(hInst, IDS_DEBUGBOX1+k, buf, sizeof(buf));
 		LvCol.pszText=buf;
-		res = ::SendMessage(hList, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+		res = SendDlgItemMessage(IDC_LISTDEBUG, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
+//		res = ::SendMessage(hList, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
 	}
 	for (LvItem.iItem=0; LvItem.iItem<(int)in.size(); LvItem.iItem++)
 	{
@@ -151,6 +298,8 @@ void CDebugDlg::FillupContent(vector<string> in)
 		::SendMessage(hList, LVM_INSERTITEM, 0, (LPARAM)&LvItem);
 
 		LvItem.iSubItem++; //Second column (SetITEM)
+		size_t ss = in[LvItem.iItem].find('\t');
+		if (ss!=string::npos) in[LvItem.iItem].replace(ss,1,"   ");
 		strcpy(buf,in[LvItem.iItem].c_str());
 		::SendMessage(hList, LVM_SETITEM, 0, (LPARAM)&LvItem);
 	}
@@ -173,19 +322,39 @@ void CDebugDlg::lvInit()
 
 void CDebugDlg::OnShowWindow(BOOL fShow, UINT status)
 {
-	CWndDlg::OnInitDialog(hDlg, NULL);
+		RECT rt;
+	int res(0);
+	if (fShow)
+	{
+		FILE*fp=fopen("c:\\temp\\windows_log.txt","at");
+		fprintf(fp,"CDebugDlg=0x%x\t%s\n", hDlg, udfname.c_str());
+		fprintf(fp,"hList=0x%x\n", hList);
+		fclose(fp);
+		res = ::GetClientRect (mTab.hTab, &rt);
+	}
+}
+
+int CDebugDlg::SetSize()
+{
+ 	CRect rt;
+	int res = ::GetClientRect (hParent->hDlg, &rt);
+	int vOffset = 25;
+	res = ::MoveWindow(hList, 0, 0, rt.right-vOffset, rt.bottom, 1);
+	res = MoveWindow(0, vOffset, rt.right, rt.bottom-vOffset, 1);
+
+//	res = ::GetClientRect (mTab.hTab, &rt);
+
+	return res;
 }
 
 void CDebugDlg::OnSize(UINT state, int cx, int cy)
 {
-	::MoveWindow(GetDlgItem(IDC_LISTDEBUG), 0, 0, cx, cy, 1);
-	int res = ListView_SetColumnWidth(hList, 3, cx);
+	::MoveWindow(hList, 0, 0, cx, cy, 1);
+	int res = ListView_SetColumnWidth(hList, 1, cx-20);
 }
 
 void CDebugDlg::OnClose()
 {
-// Once debug window is created, it stays until the end of application (when closing, it becomes only hidden)
-	ShowWindow(SW_HIDE);
 
 	// Then bring it back ---ShowWindow(SW_SHOW); if it hits the breakpoint.... do this tomorrow 7/3/2017 bjk
 
@@ -193,36 +362,82 @@ void CDebugDlg::OnClose()
 
 void CDebugDlg::OnDestroy()
 {
-	::SendMessage(GetParent(hDlg), WM_DEBUG_CLOSE, (WPARAM)udfname.c_str(), 0);
+//	::SendMessage(GetParent(hDlg), WM_DEBUG_CLOSE, (WPARAM)udfname.c_str(), 0);
+}
+
+int CDebugDlg::GetCurrentCursor()
+{
+		int marked = ListView_GetSelectionMark(hList);
+		return marked;
+
 }
 
 void CDebugDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 {
+#ifdef _DEBUG
+	bool play=true;
+#else
+	bool play=true;
+#endif
+	bool debugging = mainSpace.vecast.size()>1;
 	char buf[256];
 	DWORD dw;
 	int res, marked, lineChecked;
 	switch(idc)
 	{
-	case ID_F10: //from accelerator event should be 1
+	case ID_F11: //from accelerator, event should be 1
+		strcpy(buf, "#stin ");
+		break;
+	case ID_F10: //from accelerator, event should be 1
 		strcpy(buf, "#step ");
-	case ID_F5: //from accelerator event should be 1
-		if (idc==ID_F5) 
-			strcpy(buf, "#cont "), Beep(150,400);
-		for (int k=0; k<6;k++)
-			mainSpace.debug_command_frame[k].Event.KeyEvent.uChar.AsciiChar = buf[k];
-		res = WriteConsoleInput(hStdin, mainSpace.debug_command_frame, 6, &dw);
+		break;
+	case ID_F5: //from accelerator, event should be 1
+		strcpy(buf, "#cont ");
+//		if (play) Beep(150,400);
+		break; 
+	case ID_DB_EXIT: //from accelerator, event should be 1
+		strcpy(buf, "#abor ");
+//		if (play) Beep(2500,400);
 		break;
 
-	case ID_F9: //from accelerator event should be 1
+	case ID_RUN2CUR:
+		strcpy(buf, "#r2cu ");
+		for (size_t k=0; k<mainSpace.vecast.size(); k++)
+			mainSpace.vecast[k]->pEnv->curLine = ListView_GetSelectionMark(hList)+1;
+		break;
+
+	case ID_F9: //from accelerator, event should be 1
 		marked = ListView_GetSelectionMark(hList);
 		lineChecked = ListView_GetCheckState(hList, marked);
 		ListView_SetCheckState(hList, marked, lineChecked ? 0:1);
 		break;
 
+	case ID_OPEN:
+		fullfname[0]=fname[0]=0;
+		if (fileDlg2.FileOpenDlg(fullfname, fname, "AUX UDF file (*.AUX)\0*.aux\0", "aux"))
+//		if (((CDebugBaseDlg*)hParent)->FileOpen(fullfname))
+			((CDebugBaseDlg*)hParent)->open_tab_with_UDF(fullfname, -1);
+		break;
 	case IDCANCEL:
 	//	OnClose();
 		break;
 	}
+	if (debugging && (idc==ID_F10 || idc==ID_F11 || idc==ID_F5 || idc==ID_DB_EXIT || idc==ID_RUN2CUR) )
+	{
+		for (int k=0; k<6;k++)
+			mainSpace.debug_command_frame[k].Event.KeyEvent.uChar.AsciiChar = buf[k];
+		res = WriteConsoleInput(hStdin, mainSpace.debug_command_frame, 6, &dw);
+	}
+}
+
+bool CDebugDlg::cannotbeBP(int line)
+{
+	if (line==0) return true;
+	char buffer[512];
+	ListView_GetItemText(hList, line, 1, buffer, sizeof(buffer));
+	if (!strncmp(buffer, "//", 2)) return true;
+	if (strlen(buffer)==0) return true;
+	return false;
 }
 
 void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
@@ -239,8 +454,6 @@ void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	switch(code)
 	{
 	case NM_CLICK:
-		//lpnmitem = (LPNMITEMACTIVATE) lParam;
-		//clickedRow = lpnmitem->iItem;
 		break;
 	case NM_DBLCLK:
 		lpnmitem = (LPNMITEMACTIVATE) lParam;
@@ -252,7 +465,7 @@ void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	case LVN_ITEMCHANGED:
 		lpnmitem = (LPNMITEMACTIVATE) lParam;
 		clickedRow = lpnmitem->iItem;
-		if (clickedRow==0) {ListView_SetCheckState(hList, 0, 0); break;}
+		if (cannotbeBP(clickedRow)) {ListView_SetCheckState(hList, clickedRow, 0); break;}
 		lineChecked = ListView_GetCheckState(hList, clickedRow);
 		if (lpnmitem->uNewState>=LVIF_DI_SETITEM && !lpnmitem->uOldState) break;
 		if ( (lpnmitem->uNewState & LVIS_SELECTED) && !lineChecked) 	break;
@@ -317,13 +530,14 @@ LRESULT CDebugDlg::ProcessCustomDraw (NMHDR *lParam)
 		switch(lplvcd->iSubItem)
 		{
 		case 0:
-			lplvcd->clrText   = RGB(255,255,0);
-			lplvcd->clrTextBk = RGB(0,0,0);
+			lplvcd->clrText   = RGB(50,50,50);
+			lplvcd->clrTextBk = RGB(150,150,150);
 			return CDRF_NEWFONT;
 		case 1:
 		case 2:
-			lplvcd->clrText   = RGB(20,26,158);
-			lplvcd->clrTextBk = RGB(200,200,10);
+			lplvcd->clrText   = RGB(0,0,0);
+			lplvcd->clrTextBk = RGB(243,255,193);
+			SelectObject(lplvcd->nmcd.hdc, eFont);
 			return CDRF_NEWFONT;
 		}
 	}
@@ -343,3 +557,267 @@ int CDebugDlg::GetBPandUpdate()
 
 	return nLines;
 }
+
+
+BOOL CALLBACK DebugBaseProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
+{
+	if (umsg==WM_INITDIALOG)
+	{
+		((CDebugBaseDlg*)lParam)->hDlg = hDlg;
+		return ((CDebugBaseDlg*)lParam)->OnInitDialog((HWND)wParam, lParam);
+	}
+	switch (umsg)
+	{
+//	chHANDLE_DLGMSG (hDlg, WM_INITDIALOG, debugBase.OnInitDialog);
+	chHANDLE_DLGMSG (hDlg, WM_SIZE, debugBase.OnSize);
+	chHANDLE_DLGMSG (hDlg, WM_CLOSE, debugBase.OnClose);
+	chHANDLE_DLGMSG (hDlg, WM_DESTROY, debugBase.OnDestroy);
+	chHANDLE_DLGMSG (hDlg, WM_SHOWWINDOW, debugBase.OnShowWindow);
+	chHANDLE_DLGMSG (hDlg, WM_COMMAND, debugBase.OnCommand);
+
+	case WM_NOTIFY:
+		debugBase.OnNotify(hDlg, (int)(wParam), (NMHDR *)lParam);
+	default:
+		return FALSE;
+	}
+	return TRUE;
+}
+
+CDebugBaseDlg::CDebugBaseDlg(void)
+{
+	//udfname[IDD_PAGE1] = "FILE 1";
+	//udfname[IDD_PAGE1] = "ANOTHER";
+}
+
+CDebugBaseDlg::~CDebugBaseDlg(void)
+{ // This does not get called... find out how to clean debugVct 7/31/2017
+	CoUninitialize();
+	for (size_t k=0; k<debugVct.size(); k++)
+	{
+		delete debugVct[k];
+	}
+}
+
+void CDebugBaseDlg::open_tab_with_UDF(const char *fullname, int shownID)
+{ // if shownID is -1, it adds the new tab and shows it at the last (most recent) spot.
+  // if shownID is -2, it only adds the new tab without showing --use this inside a loop.
+	CREATE_CDebugDlg transfer;
+	CDebugDlg *newdbdlg = new CDebugDlg;
+	transfer.dbDlg = newdbdlg;
+	strcpy(transfer.fullfilename, fullname);
+	if (newdbdlg->hDlg = CreateDialogParam (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_PAGE1), debugBase.hDlg, (DLGPROC)debugDlgProc, (LPARAM)&transfer))
+		debugVct.push_back(newdbdlg);
+	newdbdlg->hParent = this;
+	int res = newdbdlg->SetSize();
+	_splitpath(fullname, NULL, NULL, fname, NULL);
+	if (shownID==-1)
+		shownID = (int)::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
+	mTab.AddPage(newdbdlg->hDlg, fname);
+	if (shownID!=-2)
+	{
+		TabCtrl_SetCurSel(mTab.hTab, shownID);
+		TabCtrl_SetCurFocus(mTab.hTab, shownID);
+		//Hiding the old tabpage and showing the new one
+		res = ::ShowWindow(mTab.hCur, SW_HIDE);
+		mTab.hCur=mTab.page[shownID];
+		res = ::ShowWindow(mTab.hCur, SW_SHOW);
+		FILE*fp=fopen("c:\\temp\\windows_log.txt","at");
+		fprintf(fp,"hCur set 0x%x (open_tab_with_UDF)\n", mTab.hCur);
+		fclose(fp);
+	}
+}
+
+BOOL CDebugBaseDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
+{
+	CWndDlg::OnInitDialog(hwndFocus, lParam);
+	fileDlg2.InitFileDlg(hDlg, hInst, "");
+
+	hTab = GetDlgItem(IDC_TAB1);
+	mTab.initTabcontrol(hTab);
+	mTab.mDad = this;
+	mTab.hTab = hTab;
+
+	FILE*fp=fopen("c:\\temp\\windows_log.txt","at");
+	fprintf(fp,"CDebugBaseDlg=0x%x\n", hDlg);
+	fprintf(fp,"Tab Control=0x%x\n", hTab);
+ 	RECT rt;
+	::GetClientRect (hTab, &rt);
+	fprintf(fp,"Tab size=(%d,%d)\n", rt.right,rt.bottom);
+	fclose(fp);
+
+	int firstPage2show(0);
+	char errstr[256];
+	string strRead;
+	if (ReadINI (errstr, iniFile, "DEBUG VIEW", strRead)>0)
+	{
+		vector<string> tar;
+		size_t count = str2vect(tar, strRead.c_str(), "\r\n");
+		for (size_t k=0; k<count; k++)
+			open_tab_with_UDF(tar[k].c_str(), k==count-1 ? -1 : -2);
+		//TabCtrl_SetCurSel (hTab, count-1);
+		//mTab.hCur = mTab.page[count-1];
+		//for (size_t k=0; k<count; k++)
+		//	::ShowWindow(mTab.page[k], k==count-1? SW_SHOW : SW_HIDE);
+	}
+	else
+	{
+		fullfname[0]=fname[0]=0;
+		if (fileDlg2.FileOpenDlg(fullfname, fname, "AUX UDF file (*.AUX)\0*.aux\0", "aux"))
+//		if (FileOpen(fullfname))
+			open_tab_with_UDF(fullfname, 0);
+		else
+		{
+			if (GetLastError()!=0) {GetLastErrorStr(errstr); MessageBox (errstr, "File Open dialog box error"); return 0;}
+		}
+	}
+
+	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | 
+        COINIT_DISABLE_OLE1DDE);
+	return TRUE;
+
+}
+
+char *UnicodeToAnsi(LPCWSTR s, char *dest)
+{
+	if (s==NULL) return NULL;
+	int cw=lstrlenW(s);
+	if (cw==0) {CHAR *psz=new CHAR[1];*psz='\0';return psz;}
+	int cc=WideCharToMultiByte(CP_ACP,0,s,cw,NULL,0,NULL,NULL);
+	if (cc==0) return NULL;
+	cc=WideCharToMultiByte(CP_ACP,0,s,cw,dest,cc,NULL,NULL);
+	if (cc==0) {return NULL;}
+	dest[cc]='\0';
+	return dest;
+}
+
+int CDebugBaseDlg::FileOpen(char *fullfilename)
+{
+	int res(0);
+	IFileOpenDialog *pFileOpen;
+	HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL, 
+                IID_IFileOpenDialog, reinterpret_cast<void**>(&pFileOpen));
+	hr = pFileOpen->Show(NULL);
+	if (SUCCEEDED(hr))
+	{
+		IShellItem *pItem;
+		hr = pFileOpen->GetResult(&pItem);
+		if (SUCCEEDED(hr))
+		{
+			PWSTR pszFilePath;
+			hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+			// Display the file name to the user.
+			if (SUCCEEDED(hr))
+			{
+				if (UnicodeToAnsi(pszFilePath, fullfilename))
+					res=1;
+				CoTaskMemFree(pszFilePath);
+			}
+			pItem->Release();
+		}
+	}
+	pFileOpen->Release();
+	return res;
+}
+
+void CDebugBaseDlg::OnShowWindow(BOOL fShow, UINT status)
+{
+ 	RECT rt;
+	::GetClientRect (hDlg, &rt);
+	RECT rt2;
+	int res2 = ::GetClientRect (mTab.hTab, &rt2);
+	::MoveWindow(hTab, 0, 0,  rt.right, rt.bottom, 1);
+	int res = SetWindowPos(hTab, HWND_TOPMOST, 0, 0, rt.right-rt.left, rt.bottom-rt.top, SWP_SHOWWINDOW );
+	res2 = ::GetClientRect (mTab.hTab, &rt2);
+//	That is NOT the same as ::MoveWindow(hTab, 0, 0,  rt.right, rt.bottom, 1); ==> This changes the z-order and puts hTab on TOP
+}
+
+void CDebugBaseDlg::OnSize(UINT state, int cx, int cy)
+{ // This is only in response to user re-sizing of debug window
+	::MoveWindow(hTab, 0, 0, cx, cy, 1);
+    SetWindowPos(hTab, HWND_TOPMOST, 0, 0, cx, cy, SWP_SHOWWINDOW);
+ 	RECT rt;
+	::GetClientRect (hDlg, &rt);
+	int iSel = TabCtrl_GetCurSel(hTab);
+	for (map<string, CDebugDlg*>::iterator it=dbmap.begin(); it!=dbmap.end(); it++)
+	{
+		it->second->SetSize();
+
+	}
+//	::ShowWindow(mTab.hCur, SW_SHOW);
+	
+}
+
+void CDebugBaseDlg::OnClose()
+{
+	if (MessageBox("If you close this, all udfs opened will be closed.", "Are you sure?", MB_YESNO)==IDYES)
+		OnDestroy();
+}
+
+void CDebugBaseDlg::OnDestroy()
+{
+//	::SendMessage(GetParent(hDlg), WM_DEBUG_CLOSE, 0, 0);
+	PostThreadMessage(GetWindowThreadProcessId(hDlg, NULL), WM__ENDTHREAD, 0, 0);
+}
+
+void CDebugBaseDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
+{
+	switch(idc)
+	{
+	case IDCANCEL:
+		OnClose();
+		break;
+	}
+}
+
+void CDebugBaseDlg::OnNotify(HWND hwnd, int idcc, NMHDR *pnm)
+{
+	int res(0), iPage;
+	LPNMLVKEYDOWN lvnkeydown = (LPNMLVKEYDOWN)pnm;
+	if (idcc==IDC_TAB1) 
+	{
+		mTab.OnNotify(pnm);
+	}
+	switch(pnm->code)
+	{
+	case TCN_SELCHANGING:
+        ::SetWindowLongPtr(hDlg, DWLP_MSGRESULT, (LONG)FALSE); // TO RETURN FALSE
+        return;
+	case TCN_SELCHANGE:
+		iPage = TabCtrl_GetCurSel(hTab); 
+		break;
+	case NM_DBLCLK:
+		break;
+	case LVN_ITEMCHANGED:
+		break;
+	case LVN_KEYDOWN:
+		switch(lvnkeydown->wVKey)
+		{
+		case VK_SPACE:
+			break;
+		case VK_DELETE:
+			break;
+		}
+		break;
+	}
+}
+
+BOOL CALLBACK TabPage_DlgProc(HWND hwndDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
+{
+	static int mouseclicked(0);
+	mTab.hCur = hwndDlg;
+	switch (umsg)
+	{
+		chHANDLE_DLGMSG(hwndDlg, WM_INITDIALOG, mTab.OnInitDialog);
+		chHANDLE_DLGMSG(hwndDlg, WM_SIZE, mTab.OnSize);
+		chHANDLE_DLGMSG(hwndDlg, WM_COMMAND, mTab.OnCommand);
+		//// TODO: Add TabPage dialog message crackers here...
+
+		//default:
+		//{
+		//	m_lptc->ParentProc(hwndDlg, msg, wParam, lParam);
+		//	return FALSE;
+		//}
+	}
+	return 0;
+}
+

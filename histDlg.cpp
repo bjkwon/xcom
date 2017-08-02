@@ -226,9 +226,12 @@ void CHistDlg::FillupHist(vector<string> in)
 	}
 	res = ListView_Scroll(hList,0,ListView_GetItemCount(hList)*14);
 }
-void CHistDlg::AppendHist(char *in)
+void CHistDlg::AppendHist(vector<string> input)
 {
-	LvItem.pszText=in;
-	LvItem.iItem=ListView_GetItemCount(hList)+1;
-	SendDlgItemMessage(IDC_LISTHIST,LVM_INSERTITEM,0,(LPARAM)&LvItem);
+	for (size_t k=0; k<input.size(); k++)
+	{
+		LvItem.pszText=(char*)input[k].c_str();
+		LvItem.iItem=ListView_GetItemCount(hList)+1;
+		SendDlgItemMessage(IDC_LISTHIST,LVM_INSERTITEM,0,(LPARAM)&LvItem);
+	}
 }

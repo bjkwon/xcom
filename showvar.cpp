@@ -4,9 +4,8 @@
 #include "resource1.h"
 #include "audfret.h"
 #include "xcom.h"
-#include "xcom.h"
 #include "histDlg.h"
-
+#include "TabCtrl.h"
 
 extern xcom mainSpace;
 
@@ -21,15 +20,15 @@ extern double playbackblock;
 
 extern HANDLE hEvent;
 extern CHistDlg mHistDlg;
+extern CDebugBaseDlg debugBase;
+extern CTabControl mTab;
 
 #define CELLVIEW 87893
 #define ID_HELP_SYSMENU		33758
 
-#define WM__DEBUG	WM_APP+3321 // do something later 6/4/2017 6pm
 #define WM__NEWDEBUGDLG	WM_APP+0x2000
 
 extern vector<UINT> exc; //temp
-HWND hDebugList(NULL); //temp
 
 FILE *fp;
 
@@ -43,12 +42,17 @@ BOOL CtrlHandler( DWORD fdwCtrlType );
 BOOL CALLBACK vectorsheetDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL AboutDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK debugDlgProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK DebugBaseProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+
 
 #define RMSDB(BUF,FORMAT1,FORMAT2,X) { double rms;	if ((rms=X)==-1.*std::numeric_limits<double>::infinity()) strcpy(BUF, FORMAT1); else sprintf(BUF, FORMAT2, rms); }
 
 AUDFRET_EXP void makewmstr(map<unsigned int, string> &wmstr);
 
 uintptr_t hDebugThread(NULL);
+uintptr_t hDebugThread2(NULL);
+
+unsigned int WINAPI debugThread2 (PVOID var) ;
 
 unsigned int WINAPI debugThread (PVOID var) 
 {
@@ -56,7 +60,6 @@ unsigned int WINAPI debugThread (PVOID var)
 	CDebugDlg *newdbdlg;
 	vector<CDebugDlg *> dlgVec;
 	_splitpath((char*)var, NULL, NULL, fname, NULL);
-
 	// if the UDF name is not on the map, create a new map element
 	if (dbmap.find(fname)==dbmap.end())
 	{
@@ -69,11 +72,16 @@ unsigned int WINAPI debugThread (PVOID var)
 			dlgVec.push_back(newdbdlg);
 		}
 	}
+	//FILE *fp = fopen("c:\\temp\\rec", "at");
+	//fprintf(fp, "hList = %4x\n",hList);
+	//fclose(fp);
 
 	MSG         msg ;
 	HACCEL hAccDebug = LoadAccelerators (GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_ACCEL_DEBUG));
+	HWND foreWnd;
 	while (GetMessage (&msg, NULL, 0, 0))
 	{ 
+		spyWM(msg.hwnd, msg.message, msg.wParam, msg.lParam, "c:\\temp\\rec", exc, "[debugThread-msg loop]");
 		if (msg.message==WM__ENDTHREAD) 
 			break;
 		else if (msg.message==WM__NEWDEBUGDLG)
@@ -86,20 +94,31 @@ unsigned int WINAPI debugThread (PVOID var)
 				transfer.dbDlg = newdbdlg;
 				strcpy(transfer.fullfilename, (char*)msg.wParam);
 				if (newdbdlg->hDlg = CreateDialogParam (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DEBUG), mShowDlg.hDlg, (DLGPROC)debugDlgProc, (LPARAM)&transfer))
-				{
 					dlgVec.push_back(newdbdlg);
-				}
 			}
+			else
+				dbmap[fname]->ShowWindow(SW_SHOW);
 		}
-		if (!TranslateAccelerator (newdbdlg->hDlg, hAccDebug, &msg))
+		else
 		{
-			TranslateMessage (&msg) ;
-			DispatchMessage (&msg) ;
+			int res(0);
+			foreWnd = GetForegroundWindow ();
+			for (map<string, CDebugDlg*>::iterator it=dbmap.begin(); it!=dbmap.end(); it++)
+			{
+				if (it->second->hDlg == foreWnd)
+				{	res = TranslateAccelerator (foreWnd, hAccDebug, &msg); break; }
+			}
+			if (!res && !IsDialogMessage(msg.hwnd, &msg))
+			{
+				TranslateMessage (&msg) ;
+				DispatchMessage (&msg) ;
+			}
 		}
 	}
 	//cleanup
 	for (vector<CDebugDlg *>::iterator it=dlgVec.begin(); it!=dlgVec.end(); it++)
 	{
+		DeleteObject((*it)->eFont);
 		(*it)->DestroyWindow();
 		delete *it;
 	}
@@ -184,8 +203,6 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 				strcpy(varname, var.string().c_str());
 				PostMessage(hp, WM__PLOTDLG_DESTROYED, (WPARAM)varname, 0);
 			}
-
-
 		}
 		break;
 	}
@@ -194,7 +211,7 @@ LRESULT CALLBACK HookProc(int code, WPARAM wParam, LPARAM lParam)
 
 BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 {
-	spyWM(hDlg, umsg, wParam, lParam, "c:\\temp\\rec", exc, "[showvarDlg]");
+//	spyWM(hDlg, umsg, wParam, lParam, "c:\\temp\\rec", exc, "[showvarDlg]");
 
 	CShowvarDlg *cvDlg;
 	static map<unsigned int, string> wmstr;
@@ -253,13 +270,13 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 	{
 		CSignals gcf;
 		GetFigID((HANDLE)wParam, gcf);
-		cvDlg->pcast->SetTag("gcf", gcf);
+		cvDlg->pcast->SetVar("gcf", gcf);
 		cvDlg->OnCommand(IDC_REFRESH, NULL, 0);
 		break;
 	}
 	//case WM_SYSCOMMAND:
 
-	case WM_APP+4000:
+	case WM__DEBUG:
 		cvDlg->OnDebug(*(DEBUG_STATUS*)wParam, (CAstSig *)lParam, umsg-(WM_APP+4000));
 		break;
 
@@ -295,38 +312,79 @@ void CShowvarDlg::OnVarChanged(char *varname, CSignals *sig)
 
 void CShowvarDlg::OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
 {
-	char buf[256], *buff;
-	DWORD dw;
 	map<string, CDebugDlg*>::iterator it;
-	int code, res, line;
+	int res, line;
+	CAstSig *lp;
+	static	string fullname;
 
 	switch(status)
 	{
 	case entering: 
-		mainSpace.vecast.push_back(debugAstSig);
-		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_ADDSTRING, 0, (LPARAM)debugAstSig->GetScript().c_str());
+		//inspect how many layers of ast to add to vecast
+		res=0;
+		for (CAstSig *tp=debugAstSig; tp; tp=tp->dad)
+			res++;
+		for (CAstSig *tp=mainSpace.vecast.front(); res>1; res--)
+		{
+			tp = tp->son;
+			if (mainSpace.vecast.back()!=tp) 
+			{
+				mainSpace.vecast.push_back(tp);
+				SendDlgItemMessage(IDC_DEBUGSCOPE, CB_ADDSTRING, 0, (LPARAM)tp->GetScript().c_str());
+			}
+		}
 	case progress:
-		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, 1);
-		if ((it = dbmap.find(debugAstSig->GetScript()))!=dbmap.end()) 
-			::SendMessage((lastDebug=it->second->hDlg), WM__DEBUG, (WPARAM)status, (LPARAM)debugAstSig);
+		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, SendDlgItemMessage(IDC_DEBUGSCOPE, CB_GETCOUNT)-1);
+		if ((it = dbmap.find(debugAstSig->GetScript()))==dbmap.end()) 
+		{ // only when debug Dlg is opened by a function with a lower or higher scope
+		  // otherwise debug Dlg's are opened by a button click in the show Dlg, so this can't happen.
+			debugAstSig->OpenFileInPath (debugAstSig->GetScript().c_str(), "aux", fullname);
+
+			res = ::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
+			//Old way---through "Debug" button
+			DWORD id = GetThreadId ((HANDLE) hDebugThread2);
+			PostThreadMessage(id, WM__NEWDEBUGDLG, (WPARAM)fullname.c_str(), 0);
+
+			//New way--using tab control
+			res = ::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
+//			debugBase.open_add_UDF(fullname.c_str(), 1);
+			Sleep(200);
+			TabCtrl_SetCurSel (mTab.hTab, res);
+		}
+		while ((it = dbmap.find(debugAstSig->GetScript()))==dbmap.end()) {Sleep(50);};
+		lastDebug = it->second;
+		lastDebug->pAst = debugAstSig;
+		lastDebug->Debug(status);
 		break;
 	case stepping:
-		line = (int)debugAstSig;
-		::SendMessage(lastDebug, WM__DEBUG, (WPARAM)status, (LPARAM)line);
+		lastDebug->Debug(status, (int)debugAstSig);
 		break;
 	case exiting:
-		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, 0);
-		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_DELETESTRING , 1);
-		mainSpace.vecast.pop_back();
-		::SendMessage(lastDebug, WM__DEBUG, (WPARAM)status, (LPARAM)debugAstSig);
+		res = SendDlgItemMessage(IDC_DEBUGSCOPE, CB_GETCOUNT)-1;
+		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_DELETESTRING, res);
+		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, res);
+		lastDebug->Debug(status);
 		break;
-	/*	for (map<string, set<int>>::iterator it = mainSpace.UDFsDebugging.begin(); it!=mainSpace.UDFsDebugging.end(); it++)
+	case cleanup: // no longer needed 8/2/2017
+		res=mainSpace.vecast.size()-1;
+		for (int k=0; k<res; k++)
+			mainSpace.vecast.pop_back();
+	// Cleans up all orphaned son's
+	// cleaning up son--need this if exception was thrown without cleaning it in CallUDF
+		for (CAstSig *p = mainSpace.vecast.front()->son; p; p = p->son) 
+			if (!p->son) lp = p;
+		for (CAstSig *next=NULL, *p = lp; p; )
 		{
-			mainSpace.UDFsDebugging[it->first] = dbmap[it->first]->breakpoint;
-		}*/
-
-
-
+			if (!p->dad) 
+				break;
+			else
+			{
+				next = p->dad;
+				delete p; 
+				p=next;
+			}
+		}
+		mainSpace.vecast.front()->son=NULL;
 		break;
 	}
 }
@@ -387,6 +445,7 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 
 	SendDlgItemMessage(IDC_DEBUGSCOPE, CB_ADDSTRING, 0, (LPARAM)"base workspace");
 	SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, 0);
+
 	return TRUE;
 }
 
@@ -472,7 +531,7 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 				else
 				{
 					pcast->pEnv->Fs = res; //Sample rate adjusted
-					for (map<string, CSignals>::iterator what=pcast->Tags.begin(); what!=pcast->Tags.end(); what++)
+					for (map<string, CSignals>::iterator what=pcast->Vars.begin(); what!=pcast->Vars.end(); what++)
 					{
 						CSignals tpp = what->second;
 						if(tpp.GetType()==CSIG_AUDIO)
@@ -522,6 +581,17 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 		changed = false;
 		break;
 
+	case IDC_DEBUG2:
+		id = GetThreadId ((HANDLE) hDebugThread2);
+		if (hDebugThread2)
+			PostThreadMessage(id, WM__NEWDEBUGDLG, 0, 0);
+		else
+		{
+			if ((hDebugThread2 = _beginthreadex (NULL, 0, debugThread2, (void*)fullfname, 0, NULL))==-1)
+			{MessageBox ("Debug Thread Creation Failed."); break;}
+		}
+		break;
+
 	case IDC_DEBUG:
 		fullfname[0]=fname[0]=0;
 		if (fileDlg.FileOpenDlg(fullfname, fname, "AUX UDF file (*.AUX)\0*.aux\0", "aux"))
@@ -532,10 +602,6 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 			else
 				if ((hDebugThread = _beginthreadex (NULL, 0, debugThread, (void*)fullfname, 0, NULL))==-1)
 				{MessageBox ("Debug Thread Creation Failed."); break;}
-
-
-
-
 //			LvItem.pszText=fullfname;
 //			LvItem.iItem=ListView_GetItemCount(hList)+1;
 //			SendDlgItemMessage(IDC_LIST,LVM_INSERTITEM,0,(LPARAM)&LvItem);
@@ -745,7 +811,7 @@ void CShowvarDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 							PlotCSignals(ax, *pcast->Sig.next, RGB(200,0,50));
 						//update gcf here
 						GetFigID(in.fig, gcf);
-						pcast->SetTag("gcf", gcf);
+						pcast->SetVar("gcf", gcf);
 						PostMessage(WM__PLOTDLG_CREATED, (WPARAM)buf, (LPARAM)&in);
 					}
 				}
@@ -847,17 +913,17 @@ void SetInsertLV(int type, HWND h1, HWND h2, UINT msg, LPARAM lParam)
 }
 
 
-void CShowvarDlg::Fillup(map<string,CSignals> *Tags, CSignals *cell)
+void CShowvarDlg::Fillup(map<string,CSignals> *Vars, CSignals *cell)
 {
 	int res;
 	changed=false;
 	HWND h, hList;
 	HINSTANCE hModule = GetModuleHandle(NULL);
 	char buf[256], buf1[256], buf2[256];
-	if (Tags==NULL)
-		Tags = &pcast->Tags;
+	if (Vars==NULL)
+		Vars = &pcast->Vars;
 	else
-		pcast->Tags = *Tags;
+		pcast->Vars = *Vars;
 
 	if ( (h = GetDlgItem(IDC_FS))!=NULL)
 		::SetWindowText(h, itoa(pcast->pEnv->Fs, buf, 10));
@@ -901,13 +967,13 @@ void CShowvarDlg::Fillup(map<string,CSignals> *Tags, CSignals *cell)
 		for (size_t u=cell->cell.size(); u!=0; u--)
 		{
 			sprintf(buff, "{%d}", u);
-			(*Tags)[buff] = cell->cell[u-1];
+			(*Vars)[buff] = cell->cell[u-1];
 		}
 	}
 	int xc(0);
 	int k(0); // k is for column
 	string out, arrout, lenout;
-	for (map<string, CSignals>::iterator what=Tags->begin(); what!=Tags->end(); what++)
+	for (map<string, CSignals>::iterator what=Vars->begin(); what!=Vars->end(); what++)
 	{
 		CSignals tpp = what->second;
 		LvItem.iSubItem=0; //First item (InsertITEM)

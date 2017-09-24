@@ -80,6 +80,8 @@ But it's not really useful anyway... WM_NOTIFY shouldn't be used in a cracker...
 /* void OnShowWindow(BOOL fShow, UINT status) */
 #define HANDLE_WM_SHOWWINDOW(hwnd, wParam, lParam, fn) \
     ((fn)((BOOL)(wParam), (UINT)(lParam)), 0L)
+#define FORWARD_WM_SHOWWINDOW(hwnd, fShow, status, fn) \
+    (void)(fn)((hwnd), WM_SHOWWINDOW, (WPARAM)(BOOL)(fShow), (LPARAM)(UINT)(status))
 
 
 /* void OnGetMinMaxInfo(LPMINMAXINFO lpMinMaxInfo) */

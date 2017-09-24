@@ -13,6 +13,7 @@ public:
 	size_t comid; // command ID
 	char AppPath[256];
 	INPUT_RECORD debug_command_frame[6];
+	string comPrompt;
 
 	xcom();
 	virtual ~xcom();
@@ -37,6 +38,10 @@ public:
 	bool dbmapfind(const char* udfname);
 };
 
+#define PRINTLOG(FNAME,STR) \
+{ FILE*__fp=fopen(FNAME,"at"); fprintf(__fp,STR);	fclose(__fp); }
+
 #else if //if XCOM was already defined, skip
+
 
 #endif

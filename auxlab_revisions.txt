@@ -12,5 +12,9 @@ $$231109
 DEL key in showvarDlg will delete variables
 $$2816xlim
 when gcf is updated with shorter length, xlim was not updated--this happened since bug for stereo xlim was fixed.
-
 above is for v1.16=========================4/25/2017
+
+============================8/17/2017
+BE VERY CAREFUL!!!
+Do not cast (CSignals*) to a CSignal* object. Then, it will have junk objects for next and cell
+============================8/17/2017

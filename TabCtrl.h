@@ -21,9 +21,6 @@ public:
 	int AddPage(HWND hNewpage, string title);
 	int GetCurrentPageID();
 	void FirstTabstop_SetFocus(HWND h);
-	void TabControl_GetClientRect(RECT * prc);
-	BOOL CenterTabPage(int iPage);
-	BOOL StretchTabPage(int iPage);
 	void TabCtrl_OnKeyDown(LPARAM lParam);
 	BOOL TabCtrl_OnSelChanged();
 	BOOL OnNotify(LPNMHDR pnm);

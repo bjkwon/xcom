@@ -7,6 +7,8 @@
 
 using namespace std;
 
+#define PRINTLOG(FNAME,STR) \
+{ FILE*__fp=fopen(FNAME,"at"); fprintf(__fp,STR);	fclose(__fp); }
 
 static VOID TabPageMessageLoop(HWND hwnd)
 {
@@ -176,7 +178,7 @@ void CTabControl::OnCommand(INT id, HWND hwndCtl, UINT codeNotify)
 
 
 
-
+/* Keep this for an example to use ScreenToClient()
 void CTabControl::TabControl_GetClientRect(RECT * prc)
 {
 	RECT rtab_0;
@@ -217,40 +219,7 @@ void CTabControl::TabControl_GetClientRect(RECT * prc)
 		prc->right = prc->right - 12;	// width
 	}
 }
-
-BOOL CTabControl::CenterTabPage(int iPage)
-{
-	RECT rect, rclient;
-
-	TabControl_GetClientRect(&rect);	// left, top, width, height
-
-	// Get the tab page size
-	GetClientRect(page[iPage], &rclient);
-	rclient.right = rclient.right - rclient.left;	// width
-	rclient.bottom = rclient.bottom - rclient.top;	// height
-	rclient.left = rect.left;
-	rclient.top = rect.top;
-
-	// Center the tab page, or cut it off at the edge of the tab control(bad)
-	if (rclient.right < rect.right)
-		rclient.left += (rect.right - rclient.right) / 2;
-
-	if (rclient.bottom < rect.bottom)
-		rclient.top += (rect.bottom - rclient.bottom) / 2;
-
-	// Move the child and put it on top
-	return SetWindowPos(page[iPage], HWND_TOP, rclient.left, rclient.top, rclient.right, rclient.bottom, 0);
-}
-
-BOOL CTabControl::StretchTabPage(int iPage)
-{
-	RECT rect, rectBase;
-	::GetClientRect (mDad->hDlg, &rectBase);
-	TabControl_GetClientRect(&rect);	// left, top, width, height
-
-	// Move the child and put it on top
-	return SetWindowPos(page[iPage], HWND_TOP, rect.left, rect.top, rectBase.right, rectBase.bottom, 0);
-}
+*/
 
 BOOL CTabControl::OnNotify(LPNMHDR pnm)
 {
@@ -362,29 +331,16 @@ void CTabControl::TabCtrl_OnKeyDown(LPARAM lParam)
 
 BOOL CTabControl::TabCtrl_OnSelChanged()
 {
-	int iSel = TabCtrl_GetCurSel(hTab);
-
-	//ShowWindow() does not seem to post the WM_SHOWWINDOW message
-	// to the tab page.  Since I use the hiding of the window as an
-	// indication to stop the message loop I post it explicitly.
-	//PostMessage() is necessary in the event that the Loop was started
-	// in response to a mouse click.
-
-	// ???????????????????????????//
-//	FORWARD_WM_SHOWWINDOW(m_lptc->hVisiblePage,FALSE,0,PostMessage);
-
-
 	for (size_t k(0); k<titleStr.size(); k++)
-	{
-		if (k==iSel)
-		{
-			ShowWindow(hCur=page[k], SW_SHOW);
-			FILE*fp=fopen("c:\\temp\\windows_log.txt","at");
-			fprintf(fp,"hCur set 0x%x (TabCtrl_OnSelChanged)\n", hCur);
-			fclose(fp);
-		}
-		else		 ShowWindow(page[k], SW_HIDE);
-	}
+		ShowWindow(page[k], SW_HIDE);
+	int iSel = TabCtrl_GetCurSel(hTab);
+	ShowWindow(hCur=page[iSel], SW_SHOW);
+
+#ifdef _DEBUG
+		char __buf[256];
+		sprintf(__buf, "hCur set 0x%x (TabCtrl_OnSelChanged)\n", hCur);
+		PRINTLOG("c:\\temp\\windows_log.txt", __buf)
+#endif //_DEBUG
 
 	return TRUE;
 }

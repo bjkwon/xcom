@@ -37,6 +37,7 @@ BOOL CALLBACK TabPage_DlgProc(HWND hwndDlg, UINT umsg, WPARAM wParam, LPARAM lPa
 unsigned int WINAPI debugThread (PVOID var);
 
 #define WM__NEWDEBUGDLG	WM_APP+0x2000
+#define WM__UPDATE_UDF_CONTENT	WM_APP+0x2001
 
 extern vector<UINT> exc; //temp
 
@@ -119,9 +120,6 @@ BOOL CALLBACK debugDlgProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 unsigned int WINAPI debugThread2 (PVOID var) 
 {
 	CRect *prt = (CRect *)var;
-	FILE*fp=fopen("c:\\temp\\windows_log.txt","wt");
-	fclose(fp);
-
 	HWND hBase = CreateDialogParam (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DEBUG2), mShowDlg.hDlg, (DLGPROC)DebugBaseProc, (LPARAM)&debugBase);
 	int res=debugBase.MoveWindow(*prt);
 	MSG         msg ;
@@ -187,12 +185,59 @@ CDebugDlg::~CDebugDlg(void)
 //	dbmap.erase(udfname);
 }
 
+
+/* For now (9/12/2017), debug window showing udf files is updated only IF
+ the udf is displayed (either click the tab or keyboard input)
+ OR
+ the udf is called in the command window or called by another function during a udf call
+
+ in CAstSig::SetNewScriptFromFile(), if the file content has been changed, 
+ sigproc sendmessage's to showvarDlg with an lParam of fullfilame -->so ShowFileContent is called inside CShowvarDlg::OnDebug()
+*/
+
+int CDebugDlg::ShowFileContent(const char* fullfilename)
+{
+	vector<string> lines;
+	size_t count(0);
+	FILE *fp = fopen(fullfilename, "rt");
+	if (fp!=NULL)
+	{
+		fseek (fp, 0, SEEK_END);
+		int filesize=ftell(fp);
+		fseek (fp, 0, SEEK_SET);
+		char *buf = new char[filesize+1];
+		size_t res = fread(buf, 1, (size_t)filesize, fp);
+		buf[res]=0;
+		res = fclose(fp);
+		// str2vect is not used, because we need to take blank lines as they come
+		char *lastpt=buf;
+		char *pch=strchr(buf,'\n');
+		while (pch)
+		{
+			*pch = '\0';
+			lines.push_back(lastpt);
+			lastpt = pch+1;
+			pch=strchr(lastpt,'\n');
+		}
+		// if there's a remainder, take it.
+		if (strlen(lastpt)>0) 
+			lines.push_back(lastpt);
+		delete[] buf;
+		FillupContent(lines);
+		return 1;
+	}
+	else
+	{
+		//Error handle
+		return 0;
+	}
+}
+
 BOOL CDebugDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
 	CWndDlg::OnInitDialog(hwndFocus, lParam);
 
 	char buf0[256], fname[256];
-	vector<string> lines;
 	CREATE_CDebugDlg *ptransfer = (CREATE_CDebugDlg *)lParam;
 	strcpy(buf0, "[Debug] ");
 	strcat(buf0, ptransfer->fullfilename);
@@ -203,6 +248,9 @@ BOOL CDebugDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 
 	udfname = fname;
 
+	CDebugBaseDlg *mPar = (CDebugBaseDlg*)hParent;
+	mPar->udfname[hDlg] = udfname;
+	mPar->udf_fullpath[udfname] = ptransfer->fullfilename;
 //	ptransfer->dbDlg->hDlg = GetParent(hwndFocus); // not needed since tabcontrol is used.
 	lvInit();
 
@@ -211,26 +259,18 @@ BOOL CDebugDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	LvCol.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM;
 	hList = GetDlgItem(IDC_LISTDEBUG);
 	LRESULT res = ::SendMessage(hList,LVM_SETEXTENDEDLISTVIEWSTYLE,0, /*LVS_SHOWSELALWAYS | */ LVS_EX_FULLROWSELECT|LVS_EX_CHECKBOXES);
-
-
-	FILE *fp = fopen(ptransfer->fullfilename, "rt");
-	if (fp!=NULL)
+	
+	char buf[256];
+	int width[]={50, -1, };
+	for(int k = 0; k<2; k++)
 	{
-		fseek (fp, 0, SEEK_END);
-		int filesize=ftell(fp);
-		fseek (fp, 0, SEEK_SET);
-		char *buf = new char[filesize+1];
-		size_t res = fread(buf, 1, (size_t)filesize, fp);
-		buf[res]=0;
-		res = fclose(fp);
-		size_t res2 = str2vect(lines, buf, "\r\n");
-		delete[] buf;
+		LvCol.cx=width[k];
+		LoadString(hInst, IDS_DEBUGBOX1+k, buf, sizeof(buf));
+		LvCol.pszText=buf;
+		res = SendDlgItemMessage(IDC_LISTDEBUG, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
 	}
-	else
-	{
-		//Error handle
-	}
-	FillupContent(lines);
+	ShowFileContent(ptransfer->fullfilename);
+
 	fontsize = 10;
 	HDC hdc = GetDC(NULL);
 	lf.lfHeight = -MulDiv(fontsize, GetDeviceCaps(hdc, LOGPIXELSY), 72);
@@ -274,22 +314,16 @@ void CDebugDlg::Debug(DEBUG_STATUS type, int line)
 		ListView_SetItemState (hList, lastLine-1,  0, 0x000F);
 		mainSpace.vecast.pop_back();
 		break;
+
 	}
 }
 
 void CDebugDlg::FillupContent(vector<string> in)
 {
+	SendDlgItemMessage(IDC_LISTDEBUG,LVM_DELETEALLITEMS,0,0);
 	char buf[256];
-	int width[]={50, -1, };
 	LRESULT res;
-	for(int k = 0; k<2; k++)
-	{
-		LvCol.cx=width[k];
-		LoadString(hInst, IDS_DEBUGBOX1+k, buf, sizeof(buf));
-		LvCol.pszText=buf;
-		res = SendDlgItemMessage(IDC_LISTDEBUG, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
-//		res = ::SendMessage(hList, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
-	}
+	size_t ss;
 	for (LvItem.iItem=0; LvItem.iItem<(int)in.size(); LvItem.iItem++)
 	{
 		itoa(LvItem.iItem+1, buf, 10);
@@ -298,12 +332,15 @@ void CDebugDlg::FillupContent(vector<string> in)
 		::SendMessage(hList, LVM_INSERTITEM, 0, (LPARAM)&LvItem);
 
 		LvItem.iSubItem++; //Second column (SetITEM)
-		size_t ss = in[LvItem.iItem].find('\t');
-		if (ss!=string::npos) in[LvItem.iItem].replace(ss,1,"   ");
+		while ( (ss = in[LvItem.iItem].find('\t'))!=string::npos)
+			in[LvItem.iItem].replace(ss,1,"  ");
 		strcpy(buf,in[LvItem.iItem].c_str());
-		::SendMessage(hList, LVM_SETITEM, 0, (LPARAM)&LvItem);
+		res = ::SendMessage(hList, LVM_SETITEM, 0, (LPARAM)&LvItem);
 	}
 //	res = ListView_Scroll(hList,0,ListView_GetItemCount(hList)*14);
+	for (vector<int>::iterator it=breakpoint.begin(); it!=breakpoint.end(); it++)
+		ListView_SetCheckState(hList, *it-1, 1);
+
 }
 
 void CDebugDlg::lvInit()
@@ -322,42 +359,40 @@ void CDebugDlg::lvInit()
 
 void CDebugDlg::OnShowWindow(BOOL fShow, UINT status)
 {
-		RECT rt;
 	int res(0);
+	::ShowWindow(hList, fShow);
+#ifdef _DEBUG
+	RECT rt;
+	char __buf[256], __buf2[256];
+	sprintf(__buf,"CDebugDlg=0x%x\t%s fShow=%d\n", hDlg, udfname.c_str(), fShow);
+	sprintf(__buf2,"hList=0x%x, fShow=%d\n", hList, fShow);
 	if (fShow)
 	{
-		FILE*fp=fopen("c:\\temp\\windows_log.txt","at");
-		fprintf(fp,"CDebugDlg=0x%x\t%s\n", hDlg, udfname.c_str());
-		fprintf(fp,"hList=0x%x\n", hList);
-		fclose(fp);
 		res = ::GetClientRect (mTab.hTab, &rt);
 	}
+	strcat(__buf,__buf2);
+	PRINTLOG("c:\\temp\\windows_log.txt", __buf)
+#endif //_DEBUG
 }
 
 int CDebugDlg::SetSize()
-{
+{ // evoked by CDebugBaseDlg::OnSize
  	CRect rt;
 	int res = ::GetClientRect (hParent->hDlg, &rt);
-	int vOffset = 25;
-	res = ::MoveWindow(hList, 0, 0, rt.right-vOffset, rt.bottom, 1);
-	res = MoveWindow(0, vOffset, rt.right, rt.bottom-vOffset, 1);
-
-//	res = ::GetClientRect (mTab.hTab, &rt);
-
+	int offset = 25;
+	res = MoveWindow(0, offset, rt.right, rt.bottom-offset, 1); // Causing CDebugDlg::OnSize() to run
 	return res;
 }
 
 void CDebugDlg::OnSize(UINT state, int cx, int cy)
 {
 	::MoveWindow(hList, 0, 0, cx, cy, 1);
-	int res = ListView_SetColumnWidth(hList, 1, cx-20);
+	int res = ListView_SetColumnWidth(hList, 1, cx-53);
 }
 
 void CDebugDlg::OnClose()
 {
-
 	// Then bring it back ---ShowWindow(SW_SHOW); if it hits the breakpoint.... do this tomorrow 7/3/2017 bjk
-
 }
 
 void CDebugDlg::OnDestroy()
@@ -367,9 +402,8 @@ void CDebugDlg::OnDestroy()
 
 int CDebugDlg::GetCurrentCursor()
 {
-		int marked = ListView_GetSelectionMark(hList);
-		return marked;
-
+	int marked = ListView_GetSelectionMark(hList);
+	return marked;
 }
 
 void CDebugDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
@@ -449,8 +483,9 @@ void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	UINT code=pnm->code;
 	LPNMITEMACTIVATE lpnmitem;
 	vector<int>::iterator it;
-	int marked, clickedRow;
+	int marked, current, clickedRow;
 	int res(0), lineChecked;
+	CDebugBaseDlg *mPar = (CDebugBaseDlg*)hParent;
 	switch(code)
 	{
 	case NM_CLICK:
@@ -470,6 +505,9 @@ void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 		if (lpnmitem->uNewState>=LVIF_DI_SETITEM && !lpnmitem->uOldState) break;
 		if ( (lpnmitem->uNewState & LVIS_SELECTED) && !lineChecked) 	break;
 		it = find(breakpoint.begin(), breakpoint.end(), clickedRow+1);
+		current = mTab.GetCurrentPageID();
+		udfname = mPar->udfname[mTab.hCur];
+//		mPar->udfname[this] = udfname;
 		if (lineChecked)
 		{
 			if (it==breakpoint.end())
@@ -577,6 +615,7 @@ BOOL CALLBACK DebugBaseProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 
 	case WM_NOTIFY:
 		debugBase.OnNotify(hDlg, (int)(wParam), (NMHDR *)lParam);
+		return 1; // don't I need this???? Check. 8/4/2017
 	default:
 		return FALSE;
 	}
@@ -605,9 +644,9 @@ void CDebugBaseDlg::open_tab_with_UDF(const char *fullname, int shownID)
 	CDebugDlg *newdbdlg = new CDebugDlg;
 	transfer.dbDlg = newdbdlg;
 	strcpy(transfer.fullfilename, fullname);
+	newdbdlg->hParent = this;
 	if (newdbdlg->hDlg = CreateDialogParam (GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_PAGE1), debugBase.hDlg, (DLGPROC)debugDlgProc, (LPARAM)&transfer))
 		debugVct.push_back(newdbdlg);
-	newdbdlg->hParent = this;
 	int res = newdbdlg->SetSize();
 	_splitpath(fullname, NULL, NULL, fname, NULL);
 	if (shownID==-1)
@@ -617,13 +656,27 @@ void CDebugBaseDlg::open_tab_with_UDF(const char *fullname, int shownID)
 	{
 		TabCtrl_SetCurSel(mTab.hTab, shownID);
 		TabCtrl_SetCurFocus(mTab.hTab, shownID);
-		//Hiding the old tabpage and showing the new one
-		res = ::ShowWindow(mTab.hCur, SW_HIDE);
-		mTab.hCur=mTab.page[shownID];
-		res = ::ShowWindow(mTab.hCur, SW_SHOW);
-		FILE*fp=fopen("c:\\temp\\windows_log.txt","at");
-		fprintf(fp,"hCur set 0x%x (open_tab_with_UDF)\n", mTab.hCur);
-		fclose(fp);
+
+		for (size_t k(0); k<mTab.titleStr.size(); k++)
+			::ShowWindow(mTab.page[k], SW_HIDE);
+		res = TabCtrl_GetCurSel(mTab.hTab);
+		::ShowWindow(mTab.hCur=mTab.page[res], SW_SHOW);
+
+
+#ifdef _DEBUG
+		char buf[256];
+//		//Hiding the old tabpage and showing the new one
+//		int res2 = ::ShowWindow(mTab.hCur, SW_HIDE);
+//		sprintf(buf,"old hCur=0x%x,hiding result=%d\n", mTab.hCur, res2);
+//		mTab.hCur=mTab.page[shownID];
+//		res = ::ShowWindow(mTab.hCur, SW_SHOW);
+//		sprintf(buf,"new hCur=0x%x,showing result=%d\n", mTab.hCur, res);
+//		strcat(buf,buf2);
+		PRINTLOG("c:\\temp\\windows_log.txt", buf)
+		char __buf[256];
+		sprintf(__buf,"hCur set 0x%x (open_tab_with_UDF)\n", mTab.hCur);
+		PRINTLOG("c:\\temp\\windows_log.txt", __buf)
+#endif //_DEBUG
 	}
 }
 
@@ -637,13 +690,17 @@ BOOL CDebugBaseDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	mTab.mDad = this;
 	mTab.hTab = hTab;
 
-	FILE*fp=fopen("c:\\temp\\windows_log.txt","at");
-	fprintf(fp,"CDebugBaseDlg=0x%x\n", hDlg);
-	fprintf(fp,"Tab Control=0x%x\n", hTab);
- 	RECT rt;
-	::GetClientRect (hTab, &rt);
-	fprintf(fp,"Tab size=(%d,%d)\n", rt.right,rt.bottom);
-	fclose(fp);
+#ifdef _DEBUG
+		char __buf[256], __buf2[256];
+		sprintf(__buf,"CDebugBaseDlg=0x%x\n", hDlg);
+		sprintf(__buf2,"Tab Control=0x%x\n", hTab);
+		strcat(__buf, __buf2);
+ 		RECT rt;
+		::GetClientRect (hTab, &rt);
+		sprintf(__buf2,"Tab size=(%d,%d)\n", rt.right,rt.bottom);
+		strcat(__buf, __buf2);
+		PRINTLOG("c:\\temp\\windows_log.txt", __buf)
+#endif //_DEBUG	
 
 	int firstPage2show(0);
 	char errstr[256];
@@ -653,9 +710,11 @@ BOOL CDebugBaseDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 		vector<string> tar;
 		size_t count = str2vect(tar, strRead.c_str(), "\r\n");
 		for (size_t k=0; k<count; k++)
-			open_tab_with_UDF(tar[k].c_str(), k==count-1 ? -1 : -2);
-		//TabCtrl_SetCurSel (hTab, count-1);
-		//mTab.hCur = mTab.page[count-1];
+			open_tab_with_UDF(tar[k].c_str(), k==count-1? -1 : -2 );
+//		res =::ShowWindow(mTab.hCur, SW_HIDE);
+//		res =::ShowWindow(mTab.hCur, SW_SHOW);
+//		TabCtrl_SetCurSel (hTab, count-1);
+//		mTab.hCur = mTab.page[count-1];
 		//for (size_t k=0; k<count; k++)
 		//	::ShowWindow(mTab.page[k], k==count-1? SW_SHOW : SW_HIDE);
 	}
@@ -725,19 +784,19 @@ void CDebugBaseDlg::OnShowWindow(BOOL fShow, UINT status)
 	::GetClientRect (hDlg, &rt);
 	RECT rt2;
 	int res2 = ::GetClientRect (mTab.hTab, &rt2);
-	::MoveWindow(hTab, 0, 0,  rt.right, rt.bottom, 1);
-	int res = SetWindowPos(hTab, HWND_TOPMOST, 0, 0, rt.right-rt.left, rt.bottom-rt.top, SWP_SHOWWINDOW );
+//	::MoveWindow(hTab, 0, 0,  rt.right, rt.bottom, 1);
+	int res = SetWindowPos(hTab, HWND_BOTTOM, 0, 0, rt.right-rt.left, rt.bottom-rt.top, SWP_SHOWWINDOW );
 	res2 = ::GetClientRect (mTab.hTab, &rt2);
 //	That is NOT the same as ::MoveWindow(hTab, 0, 0,  rt.right, rt.bottom, 1); ==> This changes the z-order and puts hTab on TOP
 }
 
 void CDebugBaseDlg::OnSize(UINT state, int cx, int cy)
 { // This is only in response to user re-sizing of debug window
-	::MoveWindow(hTab, 0, 0, cx, cy, 1);
-    SetWindowPos(hTab, HWND_TOPMOST, 0, 0, cx, cy, SWP_SHOWWINDOW);
- 	RECT rt;
-	::GetClientRect (hDlg, &rt);
-	int iSel = TabCtrl_GetCurSel(hTab);
+	::MoveWindow(hTab, 0, 0, cx, 50, 1);
+  //  SetWindowPos(hTab, HWND_TOPMOST, 0, 0, cx, cy, SWP_SHOWWINDOW);
+// 	RECT rt;
+//	::GetClientRect (hDlg, &rt);
+//	int iSel = TabCtrl_GetCurSel(hTab);
 	for (map<string, CDebugDlg*>::iterator it=dbmap.begin(); it!=dbmap.end(); it++)
 	{
 		it->second->SetSize();

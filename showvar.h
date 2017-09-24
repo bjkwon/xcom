@@ -88,6 +88,7 @@ public:
 	void OnPlotDlgCreated(char *varname, GRAFWNDDLGSTRUCT *pin);
 	void OnPlotDlgDestroyed(char *varname);
 	void OnVarChanged(char *varname, CSignals *sig);
+	void OnVarChanged(CAstSig *pcast);
 	void OnCloseFig(int figID);
 	void UpdateSheets();
 	void Fillup(map<string,CSignals> *Tags=NULL, CSignals *cell=NULL);

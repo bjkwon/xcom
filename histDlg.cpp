@@ -2,6 +2,7 @@
 #include "histDlg.h"
 #include "resource1.h"
 #include "audfret.h"
+#include "xcom.h"
 
 extern CHistDlg mHistDlg;
 
@@ -110,7 +111,7 @@ void CHistDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 {
 }
 
-int char2INPUT_RECORD(char *buf, INPUT_RECORD ir[])
+int char2INPUT_RECORD(const char *buf, INPUT_RECORD ir[])
 {
 	unsigned int k(0), id(0);
 	HKL hkl = GetKeyboardLayout (0);
@@ -120,6 +121,14 @@ int char2INPUT_RECORD(char *buf, INPUT_RECORD ir[])
 		ir[k].EventType = KEY_EVENT;
 		ir[k].Event.KeyEvent.bKeyDown = 1;
 		mix = VkKeyScanEx(buf[id], hkl);
+
+		if (buf[id]<0 || buf[id]>139)
+		{
+			char sss[4096];
+			sprintf(sss,"buf[%d]=%d, %s", id, buf[id], buf);
+			MessageBox(mHistDlg.hDlg,"non null mHistDlg", sss, 0);
+		}
+
 
 		(HIBYTE(mix)==1) ? ir[k].Event.KeyEvent.dwControlKeyState = SHIFT_PRESSED : ir[k].Event.KeyEvent.dwControlKeyState = 0;
 		ir[k].Event.KeyEvent.uChar.AsciiChar = buf[id];
@@ -146,9 +155,10 @@ int char2INPUT_RECORD(char *buf, INPUT_RECORD ir[])
 
 void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 {
-	int res(0);
+	int res2, res(0);
 	DWORD dw;
 	static char buf[256];
+	static	string str2conv;
 	LPNMHDR pnm = (LPNMHDR)lParam;
 	LPNMLISTVIEW pview = (LPNMLISTVIEW)lParam;
 	LPNMLVKEYDOWN lvnkeydown;
@@ -157,6 +167,7 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	static int clickedRow;
 	int marked;
 	INPUT_RECORD ir[256];
+	static FILE *fp;
 	switch(code)
 	{
 	case NM_CLICK:
@@ -168,6 +179,8 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 		clickedRow = lpnmitem->iItem;
 		marked = ListView_GetSelectionMark(lpnmitem->hdr.hwndFrom);
 		ListView_GetItemText(lpnmitem->hdr.hwndFrom, clickedRow, 0, buf, 256);
+//		trimLeft(buf,"\xff");
+//		trimRight(buf,"\r\n\xff");
 		WriteConsoleInput(GetStdHandle(STD_INPUT_HANDLE), ir, char2INPUT_RECORD(buf, ir), &dw);
 		break;
 	case LVN_KEYDOWN:
@@ -177,15 +190,16 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 			lpnmitem = (LPNMITEMACTIVATE) lParam;
 			marked = ListView_GetSelectionMark(lpnmitem->hdr.hwndFrom);
 			int nItems = ListView_GetSelectedCount(lpnmitem->hdr.hwndFrom);
+			str2conv="";
 			for (int k=marked; k<marked+nItems; k++)
 			{
 				ListView_GetItemText(lpnmitem->hdr.hwndFrom, k, 0, buf, 256);
-				res = char2INPUT_RECORD(buf, ir);
-				if (nItems>1 && k!=marked+nItems-1) 
-					res = WriteConsoleInput(GetStdHandle(STD_INPUT_HANDLE), ir, res, &dw);
-				else
-					res = WriteConsoleInput(GetStdHandle(STD_INPUT_HANDLE), ir, res-1, &dw);
+				str2conv += buf;
+				if (k<marked+nItems-1) str2conv += '\n';
 			}
+			res = char2INPUT_RECORD(str2conv.c_str(), ir);
+			trim(str2conv,"\xff");
+			res2 = WriteConsole(GetStdHandle(STD_OUTPUT_HANDLE), str2conv.c_str(), str2conv.size(), &dw, NULL);
 			SetFocus(GetConsoleWindow());
 		}
 		break;

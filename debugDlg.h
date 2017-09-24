@@ -51,6 +51,7 @@ public:
 	LRESULT ProcessCustomDraw (NMHDR *lParam);
 	void lvInit();
 	void FillupContent(vector<string> in);
+	int ShowFileContent(const char* fullfilename);
 	int GetBPandUpdate();
 
 
@@ -71,7 +72,8 @@ class CDebugBaseDlg : public CWndDlg
 public:
 
 	HWND hTab;
-	map<int,string> udfname;
+	map<HWND,string> udfname;
+	map<string,string> udf_fullpath;
 	map<int,HWND> dlgPage_hwnd;
 
 	CDebugBaseDlg(void);

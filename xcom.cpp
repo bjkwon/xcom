@@ -826,6 +826,10 @@ int xcom::computeandshow(const char *in, const AstNode *pCall)
 	}
 	catch (CAstSig *ast) 
 	{ // this was thrown by aux_HOOK
+		if (ast->dstatus == aborting)
+			ast->cleanup_sons();
+		else
+		{
 		try {
 			string HookName;
 			char buf[2048];
@@ -845,10 +849,12 @@ int xcom::computeandshow(const char *in, const AstNode *pCall)
 			else
 				strcpy(buf, input.substr(input.find(tar[1])).c_str());
 	
-		if (hook(ast, HookName, buf)==-1)		
-				return -1;	}
+		if (hook(ast, HookName, buf)==-1)	
+				return -1;	
+		}
 		catch (const char *errmsg) {
 		cout << "ERROR:" << errmsg << endl;	 }	
+		}
 	}
 	if (input.size()==0)
 		ShowWS_CommandPrompt(NULL);

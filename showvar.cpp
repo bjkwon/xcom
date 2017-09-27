@@ -333,7 +333,7 @@ void CShowvarDlg::OnVarChanged(char *varname, CSignals *sig)
 void CShowvarDlg::OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
 {
 	map<string, CDebugDlg*>::iterator it;
-	int res;
+	LRESULT res;
 	CAstSig *lp;
 	static	string fullname;
 
@@ -360,13 +360,13 @@ void CShowvarDlg::OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
 		  // otherwise debug Dlg's are opened by a button click in the show Dlg, so this can't happen.
 			debugAstSig->OpenFileInPath (debugAstSig->baseudfname(), "aux", fullname);
 
-			res = ::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
+			::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
 			//Old way---through "Debug" button
 			DWORD id = GetThreadId ((HANDLE) hDebugThread2);
 			PostThreadMessage(id, WM__NEWDEBUGDLG, (WPARAM)fullname.c_str(), 0);
 
 			//New way--using tab control
-			res = ::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
+			::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
 //			debugBase.open_add_UDF(fullname.c_str(), 1);
 			Sleep(200);
 			TabCtrl_SetCurSel (mTab.hTab, res);
@@ -607,9 +607,8 @@ void CShowvarDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 		break;
 
 	case IDC_DEBUG2:
-		id = GetThreadId ((HANDLE) hDebugThread2);
 		if (hDebugThread2)
-			PostThreadMessage(id, WM__NEWDEBUGDLG, 0, 0);
+			PostThreadMessage(GetThreadId ((HANDLE) hDebugThread2), WM__NEWDEBUGDLG, 0, 0);
 		else
 		{
 			if ((hDebugThread2 = _beginthreadex (NULL, 0, debugThread2, (void*)fullfname, 0, NULL))==-1)

@@ -17,8 +17,6 @@
 //name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
 //processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
-static FILE *fp1;
-
 char iniFile[256];
 
 double playbackblock(100.);
@@ -49,7 +47,7 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK historyDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL CtrlHandler( DWORD fdwCtrlType );
 void nonnulintervals(CSignal *psig, string &out, bool unit, bool clearout=false);
-size_t ReadThisLine(string &linebuf, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO coninfo0, int thisline, int promptoffset);
+size_t ReadThisLine(string &linebuf, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO coninfo0, SHORT thisline, size_t promptoffset);
 
 void nonnulintervals(CSignal *psig, string &out, bool unit, bool clearout)
 {
@@ -817,17 +815,15 @@ int xcom::computeandshow(const char *in, const AstNode *pCall)
 		}
 	}
 	catch (const char *errmsg) {
-		if (strstr(errmsg,"debug_abort"))
-			cleanup_debug();
-		else
-		{
-			cout << "ERROR: " << errmsg << endl;	 
-		}
+		cout << "ERROR: " << errmsg << endl;	 
 	}
 	catch (CAstSig *ast) 
 	{ // this was thrown by aux_HOOK
 		if (ast->dstatus == aborting)
+		{
 			ast->cleanup_sons();
+			cleanup_debug();
+		}
 		else
 		{
 		try {
@@ -1258,7 +1254,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	size_t nHistFromFile = mainSpace.ReadHist();
 	mainSpace.comid = nHistFromFile;
 
-	WriteConsole (hStdout, mainSpace.comPrompt.c_str(), mainSpace.comPrompt.size(), &dw, NULL);
+	WriteConsole (hStdout, mainSpace.comPrompt.c_str(), (DWORD)mainSpace.comPrompt.size(), &dw, NULL);
 
 	while (mShowDlg.hDlg==NULL) {
 		Sleep(100); 

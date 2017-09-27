@@ -76,7 +76,7 @@ int paste(char *buf)
 	int res = OpenClipboard(NULL);
 	HANDLE hglb = GetClipboardData(CF_TEXT); 
 	char *buff = (char*)GlobalLock(hglb);
-	size_t len = strlen(buff);
+	DWORD len = (DWORD)strlen(buff);
 	DWORD dw;
 	res = WriteConsole(hStdout, buff, len, &dw, NULL);
 	strcpy(buf, buff);
@@ -110,19 +110,20 @@ size_t CHAR_INFO2char(CHAR_INFO *chbuf, COORD sz, char* out)
 }
 
 
-size_t ReadThisLine(string &linebuf, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO coninfo0, int thisline, int promptoffset)
+size_t ReadThisLine(string &linebuf, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO coninfo0, SHORT thisline, size_t promptoffset)
 { 
 	bool loop(true);
-	int res1, out;
+	int out;
+	size_t res1;
 	CHAR_INFO *chs;
 	SMALL_RECT srct;
 	COORD      now, sz;
 	srct.Top = thisline; // coninfo0.srWindow.Top;
 	srct.Bottom = thisline;// coninfo0.srWindow.Bottom;
-	srct.Left = coninfo0.srWindow.Left + promptoffset;
+	srct.Left = coninfo0.srWindow.Left + (SHORT)promptoffset;
 	srct.Right = coninfo0.srWindow.Right;
 	now.X = 0; now.Y = 0;//coninfo0.dwCursorPosition.Y;
-	sz.X = coninfo0.dwSize.X-promptoffset;  sz.Y=1;
+	sz.X = coninfo0.dwSize.X-(SHORT)promptoffset;  sz.Y=1;
 
 	chs = new CHAR_INFO[sz.X*sz.Y];
 	int res = ReadConsoleOutput (hStdout, chs, sz, now, &srct);
@@ -137,13 +138,13 @@ size_t ReadThisLine(string &linebuf, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO con
 }
 
 
-size_t ReadTheseLines(char *readbuffer, size_t &num, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO coninfo0, CONSOLE_SCREEN_BUFFER_INFO coninfo)
+size_t ReadTheseLines(char *readbuffer, DWORD &num, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO coninfo0, CONSOLE_SCREEN_BUFFER_INFO coninfo)
 {
 	string linebuf;
 	size_t res;
-	res = ReadThisLine(linebuf, hStdout, coninfo0, coninfo0.dwCursorPosition.Y, mainSpace.comPrompt.size());
+	res = ReadThisLine(linebuf, hStdout, coninfo0, coninfo0.dwCursorPosition.Y, mainSpace.comPrompt.length());
 	strcpy(readbuffer, linebuf.c_str());
-	num = res;
+	num = (DWORD)res;
 	//check when the line is continuing down to the next line.
 	for (int k=coninfo0.dwCursorPosition.Y+1; k<coninfo.dwCursorPosition.Y+1; k++)
 	{
@@ -152,7 +153,7 @@ size_t ReadTheseLines(char *readbuffer, size_t &num, HANDLE hCon, CONSOLE_SCREEN
 		{
 			strcat(readbuffer, "\n");
 			strcat(readbuffer, linebuf.c_str());
-			num += res+1;
+			num += (DWORD)res+1;
 		}
 	}
 	return num;
@@ -163,34 +164,34 @@ void xcom::getinput(char* readbuffer)
 	string linebuf;
 	readbuffer[0]=0;
 	char buf1[4096]={0}, buf[4096]={0};
-	DWORD dw, dw2;
-	size_t nRemove(0);
-	size_t cumError(0);
+	DWORD nRemove(0), dw, dw2;
+	size_t cumError(0), ures;
 	vector<string> tar;
-	int res, res1, res2;
+	int res, res1;
 	INPUT_RECORD in[INRECORD_SIZE];
 	CHAR read;
 	SHORT delta;
 	bool showscreen(true);
 	size_t histOffset;
-	size_t num; // total count of chracters typed in
+	DWORD num(0); // total count of chracters typed in
 	size_t offset; // how many characters shifted left from the last char
 	size_t off; // how much shift of the current cursor is from the command prompt
-	int line, len, code;
+	int line, code;
 	CONSOLE_SCREEN_BUFFER_INFO coninfo0, coninfo;
 	GetConsoleScreenBufferInfo(hStdout, &coninfo0);
 	bool loop(true), returndown(false);
 	bool replacemode(false);
 	CONSOLE_CURSOR_INFO concurinf;
-	num = offset = histOffset = buf[0] = 0;
+	offset = histOffset = buf[0] = 0;
 	bool controlkeydown(false);
 	while (loop)
 	{		
-		res = ReadConsoleInput(hStdin, in, INRECORD_SIZE, &dw);
-		if (res==0) { dw = GetLastError(); 	GetLastErrorStr(buf);
-		sprintf(buf1, "code=%d", dw);	MessageBox(GetConsoleWindow(), buf, buf1, 0); 
-		if (cumError++==2) 	loop=false;
-		else	continue; }
+		if (ReadConsoleInput(hStdin, in, INRECORD_SIZE, &dw)==0)	{ 
+			dw = GetLastError(); 	GetLastErrorStr(buf);
+			sprintf(buf1, "code=%d", dw);	MessageBox(GetConsoleWindow(), buf, buf1, 0); 
+			if (cumError++==2) 	loop=false;
+			else	continue; 
+		}
 		//dw can be greater than one when 1) control-v is pressed, or 2) debug command string is dispatched from OnNotify of debugDlg, or 3) maybe in other occassions
 		if (dw>1) 
 			showscreen = !isdebugcommand(in, dw);
@@ -229,7 +230,7 @@ void xcom::getinput(char* readbuffer)
 					case VK_INSERT:
 					case VK_DELETE:
 						// pressing enter from history window... no characters registered yet
-						num = ReadTheseLines(buf, num, hStdout, coninfo0, coninfo);
+						num = (DWORD)ReadTheseLines(buf, num, hStdout, coninfo0, coninfo);
 					}
 				}
 				switch(in[k].Event.KeyEvent.wVirtualKeyCode)
@@ -244,7 +245,7 @@ void xcom::getinput(char* readbuffer)
 //					buf[num++] = '\n'; //Without this line, when multiple lines are pasted with Control-V, Debug version will work, but Release will not (no line separation..just back to back and error will occur)
 //					strcpy(readbuffer, buf);
 					if (showscreen)
-						num = ReadTheseLines(buf, num, hStdout, coninfo0, coninfo);
+						num = (DWORD)ReadTheseLines(buf, num, hStdout, coninfo0, coninfo);
 					else // for now (9/21/2017) this is only for debug messages (#step #cont ....)
 						buf[num++] = '\n'; 
 					strcpy(readbuffer, buf);
@@ -259,11 +260,11 @@ void xcom::getinput(char* readbuffer)
 					buf1[0] = '\b';
 					memcpy(buf1+1, buf+num-offset, offset+1);
 					memcpy(buf+num---offset-1, buf1+1, offset+1);
-					if (showscreen) WriteConsole (hStdout, buf1, strlen(buf1+1)+3, &dw2, NULL); // normally +2 is OK for backspace, but putting more char to cover the case where the line number is reduced
+					if (showscreen) WriteConsole (hStdout, buf1, (DWORD)strlen(buf1+1)+3, &dw2, NULL); // normally +2 is OK for backspace, but putting more char to cover the case where the line number is reduced
 				case VK_LEFT:
 					if (in[k].Event.KeyEvent.wVirtualKeyCode==VK_LEFT && !(num-offset)) break;
 					if (in[k].Event.KeyEvent.dwControlKeyState & LEFT_CTRL_PRESSED || in[k].Event.KeyEvent.dwControlKeyState & RIGHT_CTRL_PRESSED)
-						delta = (SHORT)( strlen(buf) - ctrlshiftleft(buf, offset) - offset );
+						delta = (SHORT)( strlen(buf) - ctrlshiftleft(buf, (DWORD)offset) - offset );
 					else
 						delta = 1;
 					for (int pp=0; pp<delta; pp++)
@@ -281,10 +282,7 @@ void xcom::getinput(char* readbuffer)
 					break;
 				case VK_RIGHT:
 					if (in[k].Event.KeyEvent.dwControlKeyState & LEFT_CTRL_PRESSED || in[k].Event.KeyEvent.dwControlKeyState & RIGHT_CTRL_PRESSED)
-					{
-						len = ctrlshiftright(buf, offset);
-						delta = len - off;
-					}
+						delta = (SHORT)(ctrlshiftright(buf, (DWORD)offset) - off);
 					else
 						delta = 1;
 					//first determine if current location is inside the range of num, if not break
@@ -325,11 +323,12 @@ void xcom::getinput(char* readbuffer)
 					res1 = coninfo.dwCursorPosition.Y-coninfo0.dwCursorPosition.Y;
 					for (res=0; res<=res1; res++)
 					{
+						DWORD res2;
 						if (num==0)
-							res2 = ReadThisLine(linebuf, hStdout, coninfo0, res, res==0? mainSpace.comPrompt.size(): 0 );
+							res2 = (DWORD)ReadThisLine(linebuf, hStdout, coninfo0, res, res==0? mainSpace.comPrompt.size(): 0 );
 						else
 							res2 = num;
-						WriteConsole (hStdout, buf, min(res2,coninfo0.dwMaximumWindowSize.X), &dw2, NULL);
+						WriteConsole (hStdout, buf, min(res2,(DWORD)coninfo0.dwMaximumWindowSize.X), &dw2, NULL);
 						if (res<res1) 
 						{
 							now.X=0; now.Y=coninfo0.dwCursorPosition.Y+res+1;
@@ -337,7 +336,8 @@ void xcom::getinput(char* readbuffer)
 						}
 					}
 					SetConsoleCursorPosition (hStdout, coninfo0.dwCursorPosition);
-					num=histOffset=offset=0;
+					histOffset=offset=0;
+					num=0;
 					break;
 
 				case VK_UP:
@@ -347,7 +347,7 @@ void xcom::getinput(char* readbuffer)
 						if (comid==histOffset) break;
 						histOffset++;
 						if (history.size()>comid-histOffset+1)
-							nRemove=history[comid-histOffset+1].size();
+							nRemove=(DWORD)history[comid-histOffset+1].size();
 						else
 							nRemove = num;
 					}
@@ -355,15 +355,15 @@ void xcom::getinput(char* readbuffer)
 					{
 						if (histOffset==0) break;
 						histOffset--;
-						nRemove=history[comid-histOffset-1].size();
+						nRemove=(DWORD)history[comid-histOffset-1].size();
 					}
 					memset(buf, 0, nRemove);
 					if (histOffset==0) buf[0]=0;
 					else strcpy(buf, history[comid-histOffset].c_str());
 					SetConsoleCursorPosition (hStdout, coninfo0.dwCursorPosition);
-					num = strlen(buf);
+					num = (DWORD)strlen(buf);
 					if (showscreen) WriteConsole (hStdout, buf, max(nRemove, num), &dw2, NULL);
-					coninfo.dwCursorPosition.X = coninfo0.dwCursorPosition.X + num;
+					coninfo.dwCursorPosition.X = coninfo0.dwCursorPosition.X + (SHORT)num;
 					coninfo.dwCursorPosition.Y = coninfo0.dwCursorPosition.Y;
 					SetConsoleCursorPosition (hStdout, coninfo.dwCursorPosition);
 					break;
@@ -374,13 +374,13 @@ void xcom::getinput(char* readbuffer)
 					break;
 				case VK_END:
 					line=0;
-					res = ReadThisLine(linebuf, hStdout, coninfo0, coninfo.dwCursorPosition.Y, mainSpace.comPrompt.size()) + mainSpace.comPrompt.size();
-					while (res==coninfo.dwMaximumWindowSize.X)
+					ures = ReadThisLine(linebuf, hStdout, coninfo0, coninfo.dwCursorPosition.Y, mainSpace.comPrompt.size()) + mainSpace.comPrompt.size();
+					while (ures==coninfo.dwMaximumWindowSize.X)
 					{
 						line++;
-						res = ReadThisLine(linebuf, hStdout, coninfo0, coninfo.dwCursorPosition.Y+line, 0);
+						ures = ReadThisLine(linebuf, hStdout, coninfo0, coninfo.dwCursorPosition.Y+line, 0);
 					}
-					coninfo.dwCursorPosition.X = mod(res, coninfo.dwMaximumWindowSize.X);
+					coninfo.dwCursorPosition.X = mod((SHORT)ures, coninfo.dwMaximumWindowSize.X);
 					coninfo.dwCursorPosition.Y += line;
 					SetConsoleCursorPosition (hStdout, coninfo.dwCursorPosition);
 					offset = 0;
@@ -396,7 +396,7 @@ void xcom::getinput(char* readbuffer)
 					if (!offset) break;
 					memcpy(buf1, buf+num-offset+1, offset);
 					memcpy(buf+num---offset--, buf1, offset+1);
-					if (showscreen) WriteConsole (hStdout, buf1, strlen(buf1)+1, &dw2, NULL);
+					if (showscreen) WriteConsole (hStdout, buf1, (DWORD)strlen(buf1)+1, &dw2, NULL);
 					SetConsoleCursorPosition (hStdout, coninfo.dwCursorPosition);
 					break;
 				default:
@@ -414,7 +414,7 @@ void xcom::getinput(char* readbuffer)
 							strcpy(buf1, &buf[num-offset]);
 							buf[num++-offset] = read;
 							strcpy(buf+num-offset, buf1);
-							if (showscreen) res = WriteConsole (hStdout, &buf1, strlen(buf1), &dw2, NULL);
+							if (showscreen) res = WriteConsole (hStdout, &buf1, (DWORD)strlen(buf1), &dw2, NULL);
 							GetConsoleScreenBufferInfo(hStdout, &coninfo);
 							coninfo.dwCursorPosition.X -= (SHORT)dw2;
 							if (coninfo.dwCursorPosition.X<0) //remainder string continues across line break

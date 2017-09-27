@@ -199,7 +199,7 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 			}
 			res = char2INPUT_RECORD(str2conv.c_str(), ir);
 			trim(str2conv,"\xff");
-			res2 = WriteConsole(GetStdHandle(STD_OUTPUT_HANDLE), str2conv.c_str(), str2conv.size(), &dw, NULL);
+			res2 = WriteConsole(GetStdHandle(STD_OUTPUT_HANDLE), str2conv.c_str(), (DWORD)str2conv.size(), &dw, NULL);
 			SetFocus(GetConsoleWindow());
 		}
 		break;

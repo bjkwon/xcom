@@ -79,6 +79,7 @@ int paste(char *buf)
 	DWORD len = (DWORD)strlen(buff);
 	DWORD dw;
 	res = WriteConsole(hStdout, buff, len, &dw, NULL);
+//	fprintf(fp,"WriteConsole returns %d with len=%d, dw=%d\n", res, len, dw);
 	strcpy(buf, buff);
 	GlobalUnlock((HGLOBAL)buff);
 	res = CloseClipboard();
@@ -141,9 +142,11 @@ size_t ReadThisLine(string &linebuf, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO con
 size_t ReadTheseLines(char *readbuffer, DWORD &num, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO coninfo0, CONSOLE_SCREEN_BUFFER_INFO coninfo)
 {
 	string linebuf;
-	size_t res;
+	size_t res, last;
+	
 	res = ReadThisLine(linebuf, hStdout, coninfo0, coninfo0.dwCursorPosition.Y, mainSpace.comPrompt.length());
 	strcpy(readbuffer, linebuf.c_str());
+	last = mainSpace.comPrompt.length()+res;
 	num = (DWORD)res;
 	//check when the line is continuing down to the next line.
 	for (int k=coninfo0.dwCursorPosition.Y+1; k<coninfo.dwCursorPosition.Y+1; k++)
@@ -151,10 +154,14 @@ size_t ReadTheseLines(char *readbuffer, DWORD &num, HANDLE hCon, CONSOLE_SCREEN_
 		res = ReadThisLine(linebuf, hStdout, coninfo0, k, 0);
 		if (res>0)
 		{
-			strcat(readbuffer, "\n");
+			if (last%coninfo0.dwMaximumWindowSize.X)
+				last=0, num++, strcat(readbuffer, "\n");
 			strcat(readbuffer, linebuf.c_str());
-			num += (DWORD)res+1;
+			num += (DWORD)res;
+			last += res;
 		}
+		else
+			num++, strcat(readbuffer, "\n");
 	}
 	return num;
 }
@@ -164,7 +171,7 @@ void xcom::getinput(char* readbuffer)
 	string linebuf;
 	readbuffer[0]=0;
 	char buf1[4096]={0}, buf[4096]={0};
-	DWORD nRemove(0), dw, dw2;
+	DWORD nRemove(0), nRec, dw2;
 	size_t cumError(0), ures;
 	vector<string> tar;
 	int res, res1;
@@ -184,56 +191,41 @@ void xcom::getinput(char* readbuffer)
 	CONSOLE_CURSOR_INFO concurinf;
 	offset = histOffset = buf[0] = 0;
 	bool controlkeydown(false);
+	WORD vcode;
+//	static FILE* fp;
 	while (loop)
 	{		
-		if (ReadConsoleInput(hStdin, in, INRECORD_SIZE, &dw)==0)	{ 
-			dw = GetLastError(); 	GetLastErrorStr(buf);
-			sprintf(buf1, "code=%d", dw);	MessageBox(GetConsoleWindow(), buf, buf1, 0); 
-			if (cumError++==2) 	loop=false;
-			else	continue; 
-		}
-		//dw can be greater than one when 1) control-v is pressed, or 2) debug command string is dispatched from OnNotify of debugDlg, or 3) maybe in other occassions
-		if (dw>1) 
-			showscreen = !isdebugcommand(in, dw);
-		for (UINT k=0; k<dw; k++)
+//		if (!fp) fp=fopen("in_record","at");
+		ReadConsoleInput(hStdin, in, INRECORD_SIZE, &nRec);
+//		fprintf(fp,"nRec=%d\n", nRec);
+		//nRec can be greater than one when 1) control-v is pressed (for processed input), or 2) debug command string is dispatched from OnNotify of debugDlg, or 3) maybe in other occassions
+		if (nRec>1) 
+			showscreen = !isdebugcommand(in, nRec);
+		for (UINT k=0; k<nRec; k++)
 		{
+			if (in[k].EventType !=	KEY_EVENT) 	continue;
+			code = in[k].Event.KeyEvent.uChar.AsciiChar;			vcode = in[k].Event.KeyEvent.wVirtualKeyCode;
+//			if (vcode>=0x30 && vcode<=0x5a) sprintf(buf1, "%c", vcode);
+//			else strcpy(buf1, "");
+//			fprintf(fp,"down=%d, vcode=%d(0x%2x), Char=%s(%d), dwControlKeyState=%d\n", in[k].Event.KeyEvent.bKeyDown, in[k].Event.KeyEvent.wVirtualKeyCode, in[k].Event.KeyEvent.wVirtualKeyCode, buf1, in[k].Event.KeyEvent.uChar.AsciiChar, in[k].Event.KeyEvent.dwControlKeyState );
 			if (CONTROLKEY) 
 				controlkeydown = !(in[k].Event.KeyEvent.bKeyDown==0);
-			code = in[k].Event.KeyEvent.uChar.AsciiChar;
-			if (in[k].Event.KeyEvent.wVirtualKeyCode==0x56 && (in[k].Event.KeyEvent.dwControlKeyState & (LEFT_CTRL_PRESSED+RIGHT_CTRL_PRESSED))
-				 && in[k].Event.KeyEvent.bKeyDown ) //control-V 
+			if (vcode==0x56 && (in[k].Event.KeyEvent.dwControlKeyState & (LEFT_CTRL_PRESSED+RIGHT_CTRL_PRESSED)) && in[k].Event.KeyEvent.bKeyDown ) //control-V 
 			{
-				//This works only for a Debug build. Release build will not be caught by this if. 9/21/2017 bjk
+				//This works when ENABLE_PROCESSED_INPUT is not set. If set, only a Debug build will work and Release build will not be caught by this. 10/7/2017 bjk
 				num += paste(buf+num);
-				//Right now, paste generates a string with an unnecesary trailing character \x16 --- don't know why 9/21/2017
 			}
 			//Pasting by right mouse click (or right mouse click to invoke the Menu and choose "Paste") will only paste the first line, even if multiple lines were copied... fix it 9/21/2017 bjk
-			//Control-V works (Debug and Release mode work differently but anyhow works---I still need to check if it works in regular console (I am running on Clink console) 9/21/2017 
-			if ( in[k].Event.KeyEvent.bKeyDown)
+			else if ( in[k].Event.KeyEvent.bKeyDown)
 			{
+//				fprintf(fp,"down=%d, vcode=%d(0x%2x), Char=%s(%d), dwControlKeyState=%d\n", in[k].Event.KeyEvent.bKeyDown, in[k].Event.KeyEvent.wVirtualKeyCode, in[k].Event.KeyEvent.wVirtualKeyCode, buf1, in[k].Event.KeyEvent.uChar.AsciiChar, in[k].Event.KeyEvent.dwControlKeyState );
 				read = in[k].Event.KeyEvent.uChar.AsciiChar;
 				GetConsoleScreenBufferInfo(hStdout, &coninfo);
 				off = (coninfo.dwCursorPosition.Y-coninfo0.dwCursorPosition.Y)*coninfo0.dwMaximumWindowSize.Y + coninfo.dwCursorPosition.X-coninfo0.dwCursorPosition.X;
+				if (showscreen && off!=num) // This is likely ENTER key from histDlg 
+					num = (DWORD)ReadTheseLines(buf, num, hStdout, coninfo0, coninfo);
 				COORD      now;
-				if (num==0) 
-				{
-					switch(in[k].Event.KeyEvent.wVirtualKeyCode)
-					{
-					case VK_BACK:
-					case VK_RETURN:
-					case VK_LEFT:
-					case VK_RIGHT:
-					case VK_UP:
-					case VK_DOWN:
-					case VK_HOME:
-					case VK_END:
-					case VK_INSERT:
-					case VK_DELETE:
-						// pressing enter from history window... no characters registered yet
-						num = (DWORD)ReadTheseLines(buf, num, hStdout, coninfo0, coninfo);
-					}
-				}
-				switch(in[k].Event.KeyEvent.wVirtualKeyCode)
+				switch(vcode)
 				{ 
 				case VK_RETURN:
 					// Is this actual return or enter key pressing, or transport of a block?
@@ -244,15 +236,17 @@ void xcom::getinput(char* readbuffer)
 					// if characters were lightly copied (pressing enter from the history window), they were not registered in num, so num is zero
 //					buf[num++] = '\n'; //Without this line, when multiple lines are pasted with Control-V, Debug version will work, but Release will not (no line separation..just back to back and error will occur)
 //					strcpy(readbuffer, buf);
-					if (showscreen)
+					if (showscreen && !num)
 						num = (DWORD)ReadTheseLines(buf, num, hStdout, coninfo0, coninfo);
-					else // for now (9/21/2017) this is only for debug messages (#step #cont ....)
+					else // Either control-V followed by enter pressing in Debug or debug command (#step #cont ....)
 						buf[num++] = '\n'; 
 					strcpy(readbuffer, buf);
 					buf1[0] = 0, histOffset = 0; 
 					WriteConsole (hStdout, "\r\n", 2, &dw2, NULL); // this is the real "action" of pressing the return/enter key, exiting from the loop and return out of getinput()
 					break;
 				case VK_CONTROL:
+//			GetConsoleScreenBufferInfo(hStdout, &coninfo);
+//			fprintf(fp," VK_CONTROL current cursor x=%d, y=%d\n", coninfo.dwCursorPosition.X, coninfo.dwCursorPosition.Y);
 					break;
 				case VK_BACK:
 					//don't assume that num==0 means nothing--it could be a light copy (entering from history dlg)
@@ -262,7 +256,9 @@ void xcom::getinput(char* readbuffer)
 					memcpy(buf+num---offset-1, buf1+1, offset+1);
 					if (showscreen) WriteConsole (hStdout, buf1, (DWORD)strlen(buf1+1)+3, &dw2, NULL); // normally +2 is OK for backspace, but putting more char to cover the case where the line number is reduced
 				case VK_LEFT:
-					if (in[k].Event.KeyEvent.wVirtualKeyCode==VK_LEFT && !(num-offset)) break;
+//					fprintf(fp,"wVirtualKeyCode=%d,num=%d,offset=%d\n",vcode, num,offset);
+//					if (num) fprintf(fp,"num:%s\n",buf);
+					if (vcode==VK_LEFT && !(num-offset)) break;
 					if (in[k].Event.KeyEvent.dwControlKeyState & LEFT_CTRL_PRESSED || in[k].Event.KeyEvent.dwControlKeyState & RIGHT_CTRL_PRESSED)
 						delta = (SHORT)( strlen(buf) - ctrlshiftleft(buf, (DWORD)offset) - offset );
 					else
@@ -278,7 +274,7 @@ void xcom::getinput(char* readbuffer)
 							coninfo.dwCursorPosition.X--;
 					}
 					SetConsoleCursorPosition (hStdout, coninfo.dwCursorPosition);
-					if (in[k].Event.KeyEvent.wVirtualKeyCode==VK_LEFT) offset += delta;
+					if (vcode==VK_LEFT) offset += delta;
 					break;
 				case VK_RIGHT:
 					if (in[k].Event.KeyEvent.dwControlKeyState & LEFT_CTRL_PRESSED || in[k].Event.KeyEvent.dwControlKeyState & RIGHT_CTRL_PRESSED)
@@ -342,7 +338,7 @@ void xcom::getinput(char* readbuffer)
 
 				case VK_UP:
 				case VK_DOWN:
-					if (in[k].Event.KeyEvent.wVirtualKeyCode==VK_UP)
+					if (vcode==VK_UP)
 					{
 						if (comid==histOffset) break;
 						histOffset++;
@@ -400,7 +396,9 @@ void xcom::getinput(char* readbuffer)
 					SetConsoleCursorPosition (hStdout, coninfo.dwCursorPosition);
 					break;
 				default:
-					if (!read || (in[k].Event.KeyEvent.wVirtualKeyCode>=VK_F1 && in[k].Event.KeyEvent.wVirtualKeyCode<=VK_F24) ) break;
+					if (!read || (vcode>=VK_F1 && vcode<=VK_F24) ) break;
+					//This line hopefully cleans the weird character before it appears on the cursor location--do this only when num is zero. --Now, the problem is handled in histDlg.cpp and this can be deleted 9/28/2017
+//					if (num==0) SetConsoleCursorPosition (hStdout, coninfo0.dwCursorPosition);
 					//default is replace mode (not insert mode)
 					// if cursor is in the middle
 					if (showscreen) res = WriteConsole (hStdout, &read, 1, &dw2, NULL);
@@ -432,7 +430,7 @@ void xcom::getinput(char* readbuffer)
 					break;
 
 				}
-				if (!loop) k=dw+1, strcat(buf, "\n");
+				if (!loop) k=nRec+1, strcat(buf, "\n");
 			}
 		}
 	}
@@ -450,5 +448,7 @@ void xcom::getinput(char* readbuffer)
 	}
 	else
 		SetConsoleCursorPosition (hStdout, coninfo0.dwCursorPosition);
+//	fclose(fp);
+//	fp=NULL;
 }
 	

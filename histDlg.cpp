@@ -7,6 +7,8 @@
 extern CHistDlg mHistDlg;
 
 #define FILLHIST 100
+extern HANDLE hStdin, hStdout; 
+extern xcom mainSpace;
 
 HWND CreateTT(HINSTANCE hInst, HWND hParent, RECT rt, char *string, int maxwidth=400);
 
@@ -22,6 +24,16 @@ BOOL CALLBACK historyDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 	chHANDLE_DLGMSG (hDlg, WM_TIMER, mHistDlg.OnTimer);
 	case WM_NOTIFY:
 		mHistDlg.OnNotify(hDlg, (int)(wParam), lParam);
+		break;
+	case WM_SETFONT:
+		{
+			HDC hdc = GetDC(NULL);
+			HFONT ft = (HFONT)wParam;
+			SIZE  sz;
+			GetTextExtentPoint32 (hdc, "X", 1, &sz);
+			mHistDlg.pixelPerLine = sz.cy;
+			ReleaseDC(NULL, hdc);
+		}
 		break;
 	default:
 		return FALSE;
@@ -122,14 +134,6 @@ int char2INPUT_RECORD(const char *buf, INPUT_RECORD ir[])
 		ir[k].Event.KeyEvent.bKeyDown = 1;
 		mix = VkKeyScanEx(buf[id], hkl);
 
-		if (buf[id]<0 || buf[id]>139)
-		{
-			char sss[4096];
-			sprintf(sss,"buf[%d]=%d, %s", id, buf[id], buf);
-			MessageBox(mHistDlg.hDlg,"non null mHistDlg", sss, 0);
-		}
-
-
 		(HIBYTE(mix)==1) ? ir[k].Event.KeyEvent.dwControlKeyState = SHIFT_PRESSED : ir[k].Event.KeyEvent.dwControlKeyState = 0;
 		ir[k].Event.KeyEvent.uChar.AsciiChar = buf[id];
 		ir[k].Event.KeyEvent.wVirtualKeyCode = LOBYTE(mix);
@@ -155,6 +159,7 @@ int char2INPUT_RECORD(const char *buf, INPUT_RECORD ir[])
 
 void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 {
+	static int clickedRow;
 	int res2, res(0);
 	DWORD dw;
 	static char buf[256];
@@ -164,7 +169,7 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	LPNMLVKEYDOWN lvnkeydown;
 	UINT code=pnm->code;
 	LPNMITEMACTIVATE lpnmitem;
-	static int clickedRow;
+	CONSOLE_SCREEN_BUFFER_INFO coninfo;
 	int marked;
 	INPUT_RECORD ir[256];
 	static FILE *fp;
@@ -179,8 +184,10 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 		clickedRow = lpnmitem->iItem;
 		marked = ListView_GetSelectionMark(lpnmitem->hdr.hwndFrom);
 		ListView_GetItemText(lpnmitem->hdr.hwndFrom, clickedRow, 0, buf, 256);
-//		trimLeft(buf,"\xff");
-//		trimRight(buf,"\r\n\xff");
+		//This hopefully takes care of the weird character problem 9/28/2017
+		GetConsoleScreenBufferInfo(hStdout, &coninfo);
+		coninfo.dwCursorPosition.X = mainSpace.comPrompt.size();
+		SetConsoleCursorPosition(hStdout, coninfo.dwCursorPosition);
 		WriteConsoleInput(GetStdHandle(STD_INPUT_HANDLE), ir, char2INPUT_RECORD(buf, ir), &dw);
 		break;
 	case LVN_KEYDOWN:
@@ -198,7 +205,10 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 				if (k<marked+nItems-1) str2conv += '\n';
 			}
 			res = char2INPUT_RECORD(str2conv.c_str(), ir);
-			trim(str2conv,"\xff");
+			//This hopefully takes care of the weird character problem 9/28/2017
+			GetConsoleScreenBufferInfo(hStdout, &coninfo);
+			coninfo.dwCursorPosition.X = mainSpace.comPrompt.size();
+			SetConsoleCursorPosition(hStdout, coninfo.dwCursorPosition);
 			res2 = WriteConsole(GetStdHandle(STD_OUTPUT_HANDLE), str2conv.c_str(), (DWORD)str2conv.size(), &dw, NULL);
 			SetFocus(GetConsoleWindow());
 		}
@@ -248,4 +258,6 @@ void CHistDlg::AppendHist(vector<string> input)
 		LvItem.iItem=ListView_GetItemCount(hList)+1;
 		SendDlgItemMessage(IDC_LISTHIST,LVM_INSERTITEM,0,(LPARAM)&LvItem);
 	}
+	//This advances history view by one line.
+	SendDlgItemMessage(IDC_LISTHIST,LVM_SCROLL ,0,(LPARAM)pixelPerLine);
 }

@@ -348,7 +348,7 @@ void CShowvarDlg::OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
 		{
 			tp = tp->son;
 			if (mainSpace.vecast.back()!=tp) 
-			{
+			{ //when a new debugging instance is initiated and its from a subfunction, this tp is not correct....check exam22(x,a) 10/12/2017
 				mainSpace.vecast.push_back(tp);
 				SendDlgItemMessage(IDC_DEBUGSCOPE, CB_ADDSTRING, 0, (LPARAM)tp->pCall->str);
 			}

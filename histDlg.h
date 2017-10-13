@@ -14,6 +14,7 @@ public:
 	char logfilename[256];
 
 	HFONT eFont;
+	LONG pixelPerLine;
 
 	CHistDlg(void);
 	~CHistDlg(void);

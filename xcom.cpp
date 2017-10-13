@@ -1054,6 +1054,114 @@ void xcom::LogHistory(vector<string> input)
 	}
 }
 
+int xcom::breakpoint(CAstSig *past, const AstNode *pnode)
+{
+	HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE); 
+	HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE); 
+	char buf[256];
+	bool loop(true);
+	vector<string> tar;
+	size_t num(0);
+	CAstSig *tp;
+	tp = past->son ? past->son : past;
+
+	// if debugger is on
+	if ( ( past->pEnv->DebugBreaks.size()>0) && (IsThisBreakpoint(tp, pnode) ||  tp->dstatus==stepping ||  tp->dstatus==stepping_in))
+	{// if current line is nextBreakPoint, break 
+		debug_appl_manager(tp, stepping, pnode->line);
+		mainSpace.ShowWS_CommandPrompt(tp);
+		AstNode *p=tp->pAst;
+		while (p)
+		{
+			buf[0]=0;
+			mainSpace.getinput(buf); // #cont, #step etc... don't show on the screen
+			if (buf[0]=='#')
+			{
+				num = str2vect (tar, buf+1, " \r\n");
+				if (tar[0]=="step")	
+				{
+					tp->currentLine = pnode->line+1;
+					if (tp->pLast->type==T_IF || tp->pLast->type==T_FOR || tp->pLast->type==T_WHILE || pnode->next) 
+						tp->dstatus = stepping;
+					else	
+						tp->dstatus = exiting;
+					return 1;
+				}
+				else if (tar[0]=="stin")	
+				{
+					tp->dstatus = stepping_in;
+					return 1;
+				}
+				else if (tar[0]=="abor")	
+				{
+					tp->dstatus = aborting;
+					throw tp;
+				}
+				else if (tar[0]=="cont" || tar[0]=="r2cu")
+				{
+					tp->dstatus = continuing;
+					for (vector<int>::iterator it = past->pEnv->DebugBreaks[past->pCall->str].begin(); it!=past->pEnv->DebugBreaks[past->pCall->str].end(); it++)
+					{
+						if (tp->currentLine>=*it) 
+						{
+							if (it == past->pEnv->DebugBreaks[past->pCall->str].end()-1)
+							{	tp->nextBreakPoint = 0xffff; break; }
+							continue;
+						}
+						tp->nextBreakPoint = *it; 
+					}			
+					if (tar[0]=="r2cu")
+					{
+						if (tp->pEnv->curLine < tp->nextBreakPoint)
+							tp->nextBreakPoint = tp->pEnv->curLine+1;
+					}
+					return 1;
+				}
+			}
+			//if it reaches this line, dstatus should be set to null
+			DEBUG_STATUS temp = tp->dstatus;
+			tp->dstatus = null;
+			mainSpace.computeandshow(buf);
+			tp->dstatus = temp;
+		}
+	}
+	return 1;
+}
+
+bool xcom::IsThisBreakpoint(CAstSig *past, const AstNode *pnode)
+{
+	if (!past->pCall) return false;
+	CAstSig *tp = past->son ? past->son : past;
+	if (!tp) return false;
+	if (tp->pEnv->curLine == pnode->line) return true;
+	try {
+		//const char* pstr = past->fullUDFpath;
+	//	if (!pstr) return false;
+		vector<int> bpList = past->pEnv->DebugBreaks.at(past->fullUDFpath);
+		for (vector<int>::iterator it = bpList.begin(); it!=bpList.end(); it++)
+		{
+			if (pnode->line==*it) return true;
+		}
+		return false;
+	}
+	catch ( out_of_range oor)
+	{	
+		return false; 	}
+}
+
+void xcom::debug_appl_manager(const CAstSig *debugAstSig, int debug_status, int line)
+{
+	switch(debug_status)
+	{
+	case 2: // stepping
+		SendMessage(mShowDlg.hDlg, WM__DEBUG, (WPARAM)&debug_status, (LPARAM)line);
+		break;
+	default:
+		SendMessage(mShowDlg.hDlg, WM__DEBUG, (WPARAM)&debug_status, (LPARAM)debugAstSig);
+		break;
+	}
+}
+
 void xcom::ShowWS_CommandPrompt(CAstSig *pcast)
 {
 	if (pcast && pcast->pAst)

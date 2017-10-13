@@ -527,7 +527,7 @@ void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 			if (breakpoint.empty())
 				past->pEnv->DebugBreaks.erase(udfname);
 			else 
-				past->pEnv->DebugBreaks[udfname] = breakpoint;
+				past->pEnv->DebugBreaks[fullUDFpath] = breakpoint;
 		}
 		break;
 

@@ -36,6 +36,9 @@ public:
 	void LogHistory(vector<string> input);
 	bool debugcommand(const char* cmd);
 	bool dbmapfind(const char* udfname);
+	int breakpoint(CAstSig *past, const AstNode *pnode);
+	void debug_appl_manager(const CAstSig *debugAstSig, int debug_status, int line=-1);
+	bool IsThisBreakpoint(CAstSig *past, const AstNode *pnode);
 };
 
 #define PRINTLOG(FNAME,STR) \

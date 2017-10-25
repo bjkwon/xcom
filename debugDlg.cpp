@@ -34,7 +34,6 @@ int spyWM(HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam, char* const fname,
 
 BOOL CALLBACK DebugBaseProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL CALLBACK TabPage_DlgProc(HWND hwndDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
-unsigned int WINAPI debugThread (PVOID var);
 
 #define WM__NEWDEBUGDLG	WM_APP+0x2000
 #define WM__UPDATE_UDF_CONTENT	WM_APP+0x2001
@@ -117,6 +116,7 @@ BOOL CALLBACK debugDlgProc (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 	return TRUE;
 }
 
+
 unsigned int WINAPI debugThread2 (PVOID var) 
 {
 	CRect *prt = (CRect *)var;
@@ -168,6 +168,7 @@ unsigned int WINAPI debugThread2 (PVOID var)
 	for (vector<CDebugDlg *>::iterator it=debugVct.begin(); it!=debugVct.end(); it++)
 	{
 		DeleteObject((*it)->eFont);
+		DeleteObject((*it)->eFont2);
 		(*it)->DestroyWindow();
 		delete *it;
 	}
@@ -176,6 +177,7 @@ unsigned int WINAPI debugThread2 (PVOID var)
 
 
 CDebugDlg::CDebugDlg(void)
+:pAstSig(NULL)
 {
 
 }
@@ -245,12 +247,15 @@ BOOL CDebugDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	_splitpath(ptransfer->fullfilename, NULL, NULL, fname, buf0);
 	dbmap[fname] = this;
 	strcpy(fullUDFpath, ptransfer->fullfilename);
+	string temp = fullUDFpath;
+	transform(temp.begin(), temp.end(), temp.begin(), ::tolower);
+	strcpy(fullUDFpath, temp.c_str());
 
 	udfname = fname;
 
 	CDebugBaseDlg *mPar = (CDebugBaseDlg*)hParent;
 	mPar->udfname[hDlg] = udfname;
-	mPar->udf_fullpath[udfname] = ptransfer->fullfilename;
+	mPar->udf_fullpath[udfname] = fullUDFpath;
 //	ptransfer->dbDlg->hDlg = GetParent(hwndFocus); // not needed since tabcontrol is used.
 	lvInit();
 
@@ -269,7 +274,7 @@ BOOL CDebugDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 		LvCol.pszText=buf;
 		res = SendDlgItemMessage(IDC_LISTDEBUG, LVM_INSERTCOLUMN,k,(LPARAM)&LvCol); 
 	}
-	ShowFileContent(ptransfer->fullfilename);
+	ShowFileContent(fullUDFpath);
 
 	fontsize = 10;
 	HDC hdc = GetDC(NULL);
@@ -279,23 +284,27 @@ BOOL CDebugDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 	eFont = CreateFont(lf.lfHeight,0,0,0, FW_MEDIUM, FALSE, FALSE, 0,
 		ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, 
 		FIXED_PITCH | FF_MODERN, lf.lfFaceName);
+	strcpy(lf.lfFaceName, "Arial Black");
+	eFont2 = CreateFont(lf.lfHeight,0,0,0, FW_BOLD, FALSE, FALSE, 0,
+		ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, 
+		FIXED_PITCH | FF_MODERN, lf.lfFaceName);
+
 	return TRUE;
 }
 
-void CDebugDlg::Debug(DEBUG_STATUS type, int line)
+void CDebugDlg::Debug(CAstSig *pastsig, DEBUG_STATUS type, int line)
 {
 	char buf[256];
-	int curLine, nLines;
+	int nLines;
 	switch(type)
 	{
 	case entering:
-		ListView_SetItemState (hList, -1,  0, 0x000F);
 	case progress:
-		ListView_SetItemState (hList, (lastLine = pAst->nextBreakPoint)-1,  LVIS_FOCUSED | LVIS_SELECTED, 0x000F);
 		SetFocus(hList);
 		break;
 	case stepping:
-		ListView_SetItemState (hList, lastLine-1,  0, 0x000F);
+		pAstSig = pastsig;
+		::RedrawWindow(hDlg, NULL, NULL, RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
 		nLines = (int)::SendMessage(hList, LVM_GETITEMCOUNT, 0,0); 
 		if (nLines<line)
 		{
@@ -306,15 +315,12 @@ void CDebugDlg::Debug(DEBUG_STATUS type, int line)
 			LvItem.iSubItem++; //Second column (SetITEM)
 			::SendMessage(hList, LVM_SETITEM, 0, (LPARAM)&LvItem);
 		}
-		ListView_SetItemState (hList, (lastLine = line)-1,  LVIS_FOCUSED | LVIS_SELECTED, 0x000F);
 		SetFocus(hList);
-		curLine = ListView_SetSelectionMark(hList, line-1);
 		break;
 	case exiting:
-		ListView_SetItemState (hList, lastLine-1,  0, 0x000F);
-		mainSpace.vecast.pop_back();
+		pAstSig->currentLine = -1;
+		::RedrawWindow(hDlg, NULL, NULL, RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
 		break;
-
 	}
 }
 
@@ -416,26 +422,32 @@ void CDebugDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 	bool debugging = mainSpace.vecast.size()>1;
 	char buf[256];
 	DWORD dw;
+	WORD vcode;
 	int res, marked, lineChecked;
 	switch(idc)
 	{
 	case ID_F11: //from accelerator, event should be 1
 		strcpy(buf, "#stin ");
+		vcode = VK_F11;
 		break;
 	case ID_F10: //from accelerator, event should be 1
 		strcpy(buf, "#step ");
+		vcode = VK_F10;
 		break;
 	case ID_F5: //from accelerator, event should be 1
 		strcpy(buf, "#cont ");
+		vcode = VK_F5;
 //		if (play) Beep(150,400);
 		break; 
 	case ID_DB_EXIT: //from accelerator, event should be 1
 		strcpy(buf, "#abor ");
+		vcode = VK_F5;
 //		if (play) Beep(2500,400);
 		break;
 
 	case ID_RUN2CUR:
 		strcpy(buf, "#r2cu ");
+		vcode = VK_F10;
 		for (size_t k=0; k<mainSpace.vecast.size(); k++)
 			mainSpace.vecast[k]->pEnv->curLine = ListView_GetSelectionMark(hList)+1;
 		break;
@@ -458,9 +470,19 @@ void CDebugDlg::OnCommand(int idc, HWND hwndCtl, UINT event)
 	}
 	if (debugging && (idc==ID_F10 || idc==ID_F11 || idc==ID_F5 || idc==ID_DB_EXIT || idc==ID_RUN2CUR) )
 	{
-		for (int k=0; k<6;k++)
-			mainSpace.debug_command_frame[k].Event.KeyEvent.uChar.AsciiChar = buf[k];
-		res = WriteConsoleInput(hStdin, mainSpace.debug_command_frame, 6, &dw);
+		for (int k=0; k<2;k++)
+		{
+			mainSpace.debug_command_frame[k].EventType = KEY_EVENT;
+			mainSpace.debug_command_frame[k].Event.KeyEvent.uChar.AsciiChar = 0;
+			mainSpace.debug_command_frame[k].Event.KeyEvent.wVirtualKeyCode = vcode;
+			if (vcode==VK_F5 && idc==ID_DB_EXIT)
+				mainSpace.debug_command_frame[k].Event.KeyEvent.dwControlKeyState = SHIFT_PRESSED;
+			else if (vcode==VK_F10 && idc==ID_RUN2CUR) 
+				mainSpace.debug_command_frame[k].Event.KeyEvent.dwControlKeyState = RIGHT_CTRL_PRESSED;
+		}
+		mainSpace.debug_command_frame[0].Event.KeyEvent.bKeyDown = 1;
+		mainSpace.debug_command_frame[1].Event.KeyEvent.bKeyDown = 0;
+		res = WriteConsoleInput(hStdin, mainSpace.debug_command_frame, 2, &dw);
 	}
 }
 
@@ -521,14 +543,10 @@ void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 			if (it!=breakpoint.end())
 				breakpoint.erase(it);
 		}
-		for (vector<CAstSig*>::iterator it=mainSpace.vecast.begin(); it!=mainSpace.vecast.end(); it++)
-		{
-			CAstSig *past = *it;
-			if (breakpoint.empty())
-				past->pEnv->DebugBreaks.erase(udfname);
-			else 
-				past->pEnv->DebugBreaks[fullUDFpath] = breakpoint;
-		}
+		if (breakpoint.empty())
+			mainSpace.vecast.front()->pEnv->DebugBreaks.erase(udfname);
+		else 
+			mainSpace.vecast.front()->pEnv->DebugBreaks[fullUDFpath] = breakpoint;
 		break;
 
 	//case LVN_KEYDOWN:
@@ -545,15 +563,18 @@ void CDebugDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	//		break;
 	//	}
 	case NM_CUSTOMDRAW:
-        ::SetWindowLongPtr(hwnd, DWLP_MSGRESULT, (LONG)ProcessCustomDraw(pnm));
+  		lpnmitem = (LPNMITEMACTIVATE) lParam;
+		clickedRow = lpnmitem->iItem;
+      ::SetWindowLongPtr(hwnd, DWLP_MSGRESULT, (LONG)ProcessCustomDraw(pnm));
         return;
 	default:
 		break;
 	}
 }
 
-LRESULT CDebugDlg::ProcessCustomDraw (NMHDR *lParam)
+LRESULT CDebugDlg::ProcessCustomDraw (NMHDR *lParam, bool tick)
 {
+	int iRow;
 	LPNMLVCUSTOMDRAW lplvcd = (LPNMLVCUSTOMDRAW)lParam;
 	switch(lplvcd->nmcd.dwDrawStage) 
 	{
@@ -565,17 +586,35 @@ LRESULT CDebugDlg::ProcessCustomDraw (NMHDR *lParam)
 		return CDRF_NOTIFYSUBITEMDRAW;
 
 	case CDDS_SUBITEM | CDDS_ITEMPREPAINT: //Before a subitem is drawn
+		iRow = lplvcd->nmcd.dwItemSpec;	
 		switch(lplvcd->iSubItem)
 		{
 		case 0:
 			lplvcd->clrText   = RGB(50,50,50);
 			lplvcd->clrTextBk = RGB(150,150,150);
+			SelectObject(lplvcd->nmcd.hdc, eFont);
+			if (pAstSig)
+			{
+				if (iRow==pAstSig->currentLine-1) 
+				{
+					lplvcd->clrTextBk = RGB(100,200,40);
+					SelectObject(lplvcd->nmcd.hdc, eFont2);
+				}
+			}
 			return CDRF_NEWFONT;
 		case 1:
 		case 2:
 			lplvcd->clrText   = RGB(0,0,0);
 			lplvcd->clrTextBk = RGB(243,255,193);
 			SelectObject(lplvcd->nmcd.hdc, eFont);
+			if (pAstSig)
+			{
+				if (iRow==pAstSig->currentLine-1) 
+				{
+					lplvcd->clrTextBk = RGB(100,200,40);
+					SelectObject(lplvcd->nmcd.hdc, eFont2);
+				}
+			}
 			return CDRF_NEWFONT;
 		}
 	}

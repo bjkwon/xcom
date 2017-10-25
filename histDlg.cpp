@@ -171,7 +171,7 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 	LPNMITEMACTIVATE lpnmitem;
 	CONSOLE_SCREEN_BUFFER_INFO coninfo;
 	int marked;
-	INPUT_RECORD ir[256];
+	INPUT_RECORD *ir;
 	static FILE *fp;
 	switch(code)
 	{
@@ -186,9 +186,11 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 		ListView_GetItemText(lpnmitem->hdr.hwndFrom, clickedRow, 0, buf, 256);
 		//This hopefully takes care of the weird character problem 9/28/2017
 		GetConsoleScreenBufferInfo(hStdout, &coninfo);
-		coninfo.dwCursorPosition.X = mainSpace.comPrompt.size();
+		coninfo.dwCursorPosition.X = (SHORT)mainSpace.comPrompt.size();
 		SetConsoleCursorPosition(hStdout, coninfo.dwCursorPosition);
+		ir = new INPUT_RECORD[2*strlen(buf)+3];
 		WriteConsoleInput(GetStdHandle(STD_INPUT_HANDLE), ir, char2INPUT_RECORD(buf, ir), &dw);
+		delete[] ir;
 		break;
 	case LVN_KEYDOWN:
 		lvnkeydown = (LPNMLVKEYDOWN)lParam;
@@ -204,12 +206,14 @@ void CHistDlg::OnNotify(HWND hwnd, int idcc, LPARAM lParam)
 				str2conv += buf;
 				if (k<marked+nItems-1) str2conv += '\n';
 			}
+			ir = new INPUT_RECORD[2*str2conv.size() + 3];
 			res = char2INPUT_RECORD(str2conv.c_str(), ir);
 			//This hopefully takes care of the weird character problem 9/28/2017
 			GetConsoleScreenBufferInfo(hStdout, &coninfo);
-			coninfo.dwCursorPosition.X = mainSpace.comPrompt.size();
+			coninfo.dwCursorPosition.X = (SHORT)mainSpace.comPrompt.size();
 			SetConsoleCursorPosition(hStdout, coninfo.dwCursorPosition);
 			res2 = WriteConsole(GetStdHandle(STD_OUTPUT_HANDLE), str2conv.c_str(), (DWORD)str2conv.size(), &dw, NULL);
+			delete[] ir;
 			SetFocus(GetConsoleWindow());
 		}
 		break;

@@ -20,14 +20,14 @@ class CDebugDlg : public CWndDlg
 public:
 	string udfname;
 	char fullUDFpath[256];
-	CAstSig *pAst;
+	CAstSig *pAstSig;
 	int lastLine;
 	vector<int> breakpoint;
 	HWND hList;
 	LVCOLUMN LvCol; // Make Coluom struct for ListView
 	LVITEM LvItem;  // ListView Item struct
 
-	HFONT eFont;
+	HFONT eFont, eFont2;
 	int fontsize;
 	LOGFONT      lf;
 
@@ -48,14 +48,14 @@ public:
 	int SetSize();
 	void OnNotify(HWND hwnd, int idcc, LPARAM lParam);
 	bool cannotbeBP(int line);
-	LRESULT ProcessCustomDraw (NMHDR *lParam);
+	LRESULT ProcessCustomDraw (NMHDR *lParam, bool tick=false);
 	void lvInit();
 	void FillupContent(vector<string> in);
 	int ShowFileContent(const char* fullfilename);
 	int GetBPandUpdate();
 
 
-	void Debug(DEBUG_STATUS type, int line=-1);
+	void Debug(CAstSig *pastsig, DEBUG_STATUS type, int line=-1);
 
 };
 

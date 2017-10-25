@@ -93,7 +93,7 @@ public:
 	void UpdateSheets();
 	void Fillup(map<string,CSignals> *Tags=NULL, CSignals *cell=NULL);
 	void lvInit();
-	void OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry);
+	void debug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry);
 	HACCEL hAccel;
 	HANDLE curFig;
 	HANDLE *figwnd;

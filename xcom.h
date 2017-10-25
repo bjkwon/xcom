@@ -2,11 +2,23 @@
 #ifndef XCOM
 #define XCOM
 
+#define MAIN_PROMPT "AUX>"
+#define DEBUG_PROMPT "K>"
+
+enum DEBUG_KEY
+{
+	non_debug=0,
+    debug_F5,
+    debug_F10,
+    debug_F11,
+    debug_Shift_F5,
+    debug_Ctrl_F10,
+};
+
 class xcom
 {
 public:
 	vector<CAstSig*> vecast;
-	vector<const AstNode*> vecnodeUDF;
 
 	vector<string> history;
 	size_t nHistFromFile;
@@ -18,9 +30,8 @@ public:
 	xcom();
 	virtual ~xcom();
 	void console();
-	void gendebugcommandframe();
-	bool isdebugcommand(INPUT_RECORD *in, int len);
-	void getinput(char* readbuffer);
+	void checkdebugkey(INPUT_RECORD *in, int len);
+	DEBUG_KEY getinput(char* readbuffer);
 	size_t ReadHist();
 	void ShowWS_CommandPrompt(CAstSig *pcast);
 	int computeandshow(const char *input, const AstNode *pCall=NULL);
@@ -34,17 +45,18 @@ public:
 	size_t ctrlshiftleft(const char *buf, DWORD offset);
 	int hook(CAstSig *ast, string HookName, const char* args);
 	void LogHistory(vector<string> input);
-	bool debugcommand(const char* cmd);
 	bool dbmapfind(const char* udfname);
-	int breakpoint(CAstSig *past, const AstNode *pnode);
-	void debug_appl_manager(const CAstSig *debugAstSig, int debug_status, int line=-1);
+	void breakpoint(CAstSig *past, const AstNode *pnode, bool freepass=false);
+	void debug_appl_manager(CAstSig *debugAstSig, DEBUG_STATUS debug_status, int line=-1);
 	bool IsThisBreakpoint(CAstSig *past, const AstNode *pnode);
 };
 
 #define PRINTLOG(FNAME,STR) \
 { FILE*__fp=fopen(FNAME,"at"); fprintf(__fp,STR);	fclose(__fp); }
 
+
 #else if //if XCOM was already defined, skip
+
 
 
 #endif

@@ -26,7 +26,6 @@ char udfpath[4096];
 
 vector<UINT> exc; // temp
 
-
 xcom mainSpace;
 
 CWndDlg wnd;
@@ -39,7 +38,7 @@ extern uintptr_t hDebugThread2;
 extern map<string, CDebugDlg*> dbmap;
 extern CDebugBaseDlg debugBase;
 unsigned int WINAPI debugThread2 (PVOID var) ;
-
+unsigned int WINAPI plazaThread (PVOID var) ;
 
 HANDLE hStdin, hStdout; 
 string typestring(int type);
@@ -48,6 +47,17 @@ BOOL CALLBACK historyDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam);
 BOOL CtrlHandler( DWORD fdwCtrlType );
 void nonnulintervals(CSignal *psig, string &out, bool unit, bool clearout=false);
 size_t ReadThisLine(string &linebuf, HANDLE hCon, CONSOLE_SCREEN_BUFFER_INFO coninfo0, SHORT thisline, size_t promptoffset);
+
+bool isWin7()
+{
+	char block[4096];
+	float val;
+	getVersionString("cmd.exe", block, sizeof(block));
+	block[4]=0;
+	sscanf(block+1, "%f", &val);
+	if (val<6.2) return true;
+	else return false;
+}
 
 void nonnulintervals(CSignal *psig, string &out, bool unit, bool clearout)
 {
@@ -69,7 +79,7 @@ void print_node_struct (int layer, FILE* fp, string str, AstNode *node)
 	PRINTLAYER
 	fprintf(fp, "(%d %s) ", node->type, typestring(node->type).c_str());
 	if (node->str!=NULL) fprintf(fp, "%s, ", node->str);
-	else fprintf(fp, "_, ", node->str);
+	else fprintf(fp, "%s, ", node->str);
 	if (node->type==T_NUMBER) fprintf(fp, "%g\n", node->dval);
 	else  fprintf(fp, "_\n");
 
@@ -167,10 +177,13 @@ int writeINI(const char *fname, char *estr, CRect rtMain, CRect rtShowDlg, CRect
 	return 1;
 }
 
-void closeXcom(const char *AppPath)
+void closeXcom(const char *AppPath, map<string,AstNode *> UDFs)
 {
 	//When CTRL_CLOSE_EVENT is pressed, you have 5 seconds. That's how Console app works in Windows.
 	// Finish all cleanup work during this time.
+
+	for (map<string,AstNode *>::iterator it=UDFs.begin(); it!=UDFs.end(); it++)
+		yydeleteAstNode(it->second, 0);
 
 	CAstSig *pcast = mainSpace.vecast.front();
 	char estr[256], buffer[256];
@@ -239,6 +252,7 @@ unsigned int WINAPI histThread (PVOID var)
 	if (mHistDlg.hDlg==NULL) {MessageBox(NULL, "History Dlgbox creation failed.","AUXLAB",0); return 0;}
 
 	ShowWindow(mHistDlg.hDlg, SW_SHOW);
+	SetClassLongPtr (mHistDlg.hDlg, GCLP_HICON, (LONG)(LONG_PTR)LoadImage(GetModuleHandle(0), MAKEINTRESOURCE(IDI_ICON1), IMAGE_ICON, 0, 0, 0));
 
 	CRect rt1, rt2, rt3, rt4;
 	int res = readINI(iniFile, &rt1, &rt2, &rt3, &rt4);
@@ -275,12 +289,17 @@ unsigned int WINAPI histThread (PVOID var)
 
 unsigned int WINAPI showvarThread (PVOID var) // Thread for variable show
 {
+	bool win7;
+	if (isWin7()) win7=true;
+
 	HINSTANCE hModule = GetModuleHandle(NULL);
 
-	mShowDlg.hDlg = CreateDialog (hModule, MAKEINTRESOURCE(IDD_SHOWVAR), GetConsoleWindow(), (DLGPROC)showvarDlg);
+	mShowDlg.hDlg = CreateDialog (hModule, MAKEINTRESOURCE(IDD_SHOWVAR), win7 ? NULL : GetConsoleWindow(), (DLGPROC)showvarDlg);
 	ShowWindow(mHistDlg.hDlg,SW_SHOW);
 	mShowDlg.hList1 = GetDlgItem(mShowDlg.hDlg , IDC_LIST1);
-	
+	SetClassLongPtr (mShowDlg.hDlg, GCLP_HICON, (LONG)(LONG_PTR)LoadImage(hModule, MAKEINTRESOURCE(IDI_ICON1), IMAGE_ICON, 0, 0, 0));
+	mShowDlg.win7 = win7;
+
 	RECT rc;
 	CRect rt1, rt2, rt3, rt4;
 	int res = readINI(iniFile, &rt1, &rt2, &rt3, &rt4);
@@ -681,60 +700,59 @@ size_t xcom::ctrlshiftright(const char *buf, DWORD offset)
 	return 0;
 }
 
-void xcom::gendebugcommandframe()
+void xcom::checkdebugkey(INPUT_RECORD *in, int len)
 {
-	for (int k=0; k<6;k++)
+	// ReadConsoleInput takes the input event and returns, not exactly totally expected ways.
+	// For example, it returns with one event with bKeyDown set and subsequently with the intended virtual keycode
+	// returns two events with one bKeyDown up with the intended virtual keycode and another event (e.g., FOCUS_EVENT) 
+	// So, the key processing should take place across multiple calls to this function with vcode, vcodeLast as static variables.
+	// Hypothetically, if events of multiple keystrokes, for eaxmple, F10 key down, up, down up), come in with one return of ReadConsoleInput, only the first key stroke pair (down/up) will be taken and further processed.
+	// But it is not likely... in most cases, multiple keystrokes of the same key will come in with separate returns of ReadConsoleInput.
+	// 10/17/2017 bjk
+	if (len==0) 
+		return ;
+	int countNonKeyEventID(0);
+	vector<int> nonKeyEventID;
+	static WORD vcode(0), vcodeLast(0);
+	WORD vcode0; 
+	for (int k=0; k<len; k++)
 	{
-		debug_command_frame[k].EventType = KEY_EVENT;
-		debug_command_frame[k].Event.KeyEvent.bKeyDown = debug_command_frame[k].Event.KeyEvent.wRepeatCount = 1;
-		debug_command_frame[k].Event.KeyEvent.dwControlKeyState = 0x20;
+		if (in[k].EventType !=	KEY_EVENT) 	nonKeyEventID.push_back(k);
 	}
-	debug_command_frame[0].Event.KeyEvent.dwControlKeyState = 0x30;
-	debug_command_frame[5].Event.KeyEvent.dwControlKeyState = 0x120;
-	debug_command_frame[5].Event.KeyEvent.uChar.AsciiChar = 0x0d;
-	debug_command_frame[5].Event.KeyEvent.wVirtualKeyCode = VK_RETURN;
-}
-
-
-bool xcom::isdebugcommand(INPUT_RECORD *in, int len)
-{
-	char readbuf[32];
-	if (len==6)
+	if (nonKeyEventID.size()==len) 
+		return ;
+	for (int k=0; k<len; k++)
 	{
-		for (int k=0; k<6;k++)
+		// Exclude the event if not a keyboard event.
+		if (find(nonKeyEventID.begin(), nonKeyEventID.end(), k)==nonKeyEventID.end())
 		{
-			if ( debug_command_frame[k].Event.KeyEvent.bKeyDown != in[k].Event.KeyEvent.bKeyDown ) return false;
-			if ( debug_command_frame[k].Event.KeyEvent.dwControlKeyState != in[k].Event.KeyEvent.dwControlKeyState ) return false;
-			if ( debug_command_frame[k].Event.KeyEvent.wRepeatCount != in[k].Event.KeyEvent.wRepeatCount ) return false;
+			if (in[k].Event.KeyEvent.bKeyDown) 
+				vcodeLast = in[k].Event.KeyEvent.wVirtualKeyCode;
+			else
+				vcode = in[k].Event.KeyEvent.wVirtualKeyCode;
+			if (vcode==vcodeLast)
+				break;
 		}
-		if (in[5].Event.KeyEvent.wVirtualKeyCode != debug_command_frame[5].Event.KeyEvent.wVirtualKeyCode) return false;
-		if (in[5].Event.KeyEvent.uChar.AsciiChar != debug_command_frame[5].Event.KeyEvent.uChar.AsciiChar) return false;
-
-		int p=0;
-		for (; p<5;p++)	readbuf[p] = in[p].Event.KeyEvent.uChar.AsciiChar;
-		readbuf[p]=0;
-		if (!strcmp(readbuf, "#cont")) return true;
-		if (!strcmp(readbuf, "#step")) return true;
-		if (!strcmp(readbuf, "#stin")) return true;
-		if (!strcmp(readbuf, "#abor")) return true;
-		if (!strcmp(readbuf, "#r2cu")) return true;
 	}
-	return false;
-}
-
-bool xcom::debugcommand(const char* cmd)
-{
-	char buf[2048];
-	strcpy_s(buf, 2048, cmd);
-	char *ff = strpbrk(buf,"\r\n");
-	if (ff) ff[0]=0;
-	if (!strcmp(buf,"#step")) return true;
-	if (!strcmp(buf,"#cont")) return true;
-	if (!strcmp(buf,"#exit")) return true;
-	if (!strcmp(buf,"#stin")) return true;
-	if (!strcmp(buf,"#abor")) return true;
-	if (!strcmp(buf,"#r2cu")) return true;
-	return false;
+	if (vcode!=vcodeLast) 
+		return ;
+	vcode0=vcode;
+	vcode=vcodeLast=0;
+	switch(vcode0)
+	{
+	case VK_F11:
+		throw debug_F11;
+	case VK_F5:
+		if (in[0].Event.KeyEvent.dwControlKeyState & SHIFT_PRESSED)
+			throw debug_Shift_F5;
+		else
+			throw debug_F5;
+	case VK_F10:
+		if (in[0].Event.KeyEvent.dwControlKeyState & LEFT_CTRL_PRESSED || in[0].Event.KeyEvent.dwControlKeyState & RIGHT_CTRL_PRESSED)
+			throw debug_Ctrl_F10;
+		else
+			throw debug_F10;
+	}
 }
 
 
@@ -757,6 +775,8 @@ int xcom::cleanup_debug()
 {
 	while (mShowDlg.SendDlgItemMessage(IDC_DEBUGSCOPE, CB_DELETESTRING, 1)!=CB_ERR) {}
 	mShowDlg.SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, 0);
+
+	mShowDlg.debug(exiting, NULL, -1);
 
 	// Do memory clean up of sub in CallUDF()
 	return 0;
@@ -788,28 +808,27 @@ int xcom::computeandshow(const char *in, const AstNode *pCall)
 	if (input.size()>0)
 	try {
 		pabteg->SetNewScript(input.c_str());
-		if (pabteg->pAst->type==NODE_BLOCK && !IsConditionalLoopType(pabteg->pAst))
+		if (0) // (!IsConditionalLoopType(pabteg->pAst))
 		{
 			AstNode *p = pabteg->pAst->next;
-			while (p)
-			{
-				try {
-				pabteg->Sig = pabteg->Compute(p);
-				if (!p->suppress)
-					showarray(p);
-				p=p->next;
+			try {
+				while (p)	{
+					pabteg->Sig = pabteg->Compute(p);
+					if (!p->suppress)
+						showarray(p);
+					p = p->next;
 				}
-				catch (const CAstException &e) {
-					char errmsg[2048];
-					strncpy(errmsg, e.getErrMsg().c_str(), sizeof(errmsg)/sizeof(*errmsg));
-					errmsg[sizeof(errmsg)/sizeof(*errmsg)-1] = '\0';
-					throw errmsg;
-				}
+			}
+			catch (const CAstException &e) {
+				char errmsg[2048];
+				strncpy(errmsg, e.getErrMsg().c_str(), sizeof(errmsg)/sizeof(*errmsg));
+				errmsg[sizeof(errmsg)/sizeof(*errmsg)-1] = '\0';
+				throw errmsg;
 			}
 		}
 		else
 		{
-			pabteg->Sig = pabteg->Compute();
+			vector<CSignals> ans = pabteg->Compute();
 			if ( !pabteg->pAst->suppress)
 				showarray(pabteg->pAst);
 		}
@@ -877,7 +896,7 @@ int xcom::hook(CAstSig *ast, string HookName, const char* argstr)
 		if (tp.Sig.GetType()==CSIG_AUDIO)
 		{
 			if (HookName=="playnext")
-				tp.Sig.PlayArrayNext(0, WM_APP+100, GetConsoleWindow(), &playbackblock, errstr);
+				tp.Sig.PlayArrayNext(0, WM_APP+100, &playbackblock, errstr);
 			else if (HookName!="playloop")
 				tp.Sig.PlayArray(0, WM_APP+100, GetConsoleWindow(), &playbackblock, errstr);
 			else
@@ -1054,78 +1073,81 @@ void xcom::LogHistory(vector<string> input)
 	}
 }
 
-int xcom::breakpoint(CAstSig *past, const AstNode *pnode)
+void xcom::breakpoint(CAstSig *pastsig, const AstNode *pnode, bool freepass)
 {
-	HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE); 
-	HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE); 
 	char buf[256];
 	bool loop(true);
 	vector<string> tar;
 	size_t num(0);
-	CAstSig *tp;
-	tp = past->son ? past->son : past;
 
-	// if debugger is on
-	if ( ( past->pEnv->DebugBreaks.size()>0) && (IsThisBreakpoint(tp, pnode) ||  tp->dstatus==stepping ||  tp->dstatus==stepping_in))
+	// if no breakpoint exists in the debugger window, return here.
+	if (pastsig->pEnv->DebugBreaks.empty()) return;
+	if (pastsig->isthislocaludf())
+	{
+		if (pastsig->dstatus==progress) 
+			pastsig->dstatus = continuing;
+	}
+	else if (pastsig->dstatus!=stepping && pastsig->dstatus!=stepping_in)
+	{
+		// check if a breakpoint is set in the current udf
+		map<string, vector<int>>::iterator it=pastsig->pEnv->DebugBreaks.begin();
+		while (1)
+		{
+			if (pastsig->pEnv->UDFsPath[pastsig->Script] == it->first) break;
+			it++;
+			//if it didn't break and reached the end, there's no break point in the current udf, return here
+			if (it==pastsig->pEnv->DebugBreaks.end()) return;
+		}
+	}
+	if ( ( (IsThisBreakpoint(pastsig, pnode) ||  pastsig->dstatus==stepping ||  pastsig->dstatus==stepping_in)))
 	{// if current line is nextBreakPoint, break 
-		debug_appl_manager(tp, stepping, pnode->line);
-		mainSpace.ShowWS_CommandPrompt(tp);
-		AstNode *p=tp->pAst;
+		debug_appl_manager(pastsig, stepping, pastsig->currentLine = pnode->line);
+		mainSpace.ShowWS_CommandPrompt(pastsig);
+		AstNode *p=pastsig->pAst;
 		while (p)
 		{
 			buf[0]=0;
-			mainSpace.getinput(buf); // #cont, #step etc... don't show on the screen
-			if (buf[0]=='#')
+			DEBUG_KEY ret = mainSpace.getinput(buf);
+			switch(ret)
 			{
-				num = str2vect (tar, buf+1, " \r\n");
-				if (tar[0]=="step")	
+			case debug_F10:
+				if (pastsig->pLast->type==T_IF || pastsig->pLast->type==T_FOR || pastsig->pLast->type==T_WHILE || pnode->next) 
+					pastsig->dstatus = stepping;
+				return;
+			case debug_F11:
+				pastsig->dstatus = stepping_in;
+				return;
+			case debug_Shift_F5:
+				pastsig->dstatus = aborting;
+				throw pastsig;
+			case debug_F5:
+				pastsig->dstatus = continuing;
+				for (vector<int>::iterator it = pastsig->pEnv->DebugBreaks[pastsig->pCall->str].begin(); it!=pastsig->pEnv->DebugBreaks[pastsig->pCall->str].end(); it++)
 				{
-					tp->currentLine = pnode->line+1;
-					if (tp->pLast->type==T_IF || tp->pLast->type==T_FOR || tp->pLast->type==T_WHILE || pnode->next) 
-						tp->dstatus = stepping;
-					else	
-						tp->dstatus = exiting;
-					return 1;
-				}
-				else if (tar[0]=="stin")	
-				{
-					tp->dstatus = stepping_in;
-					return 1;
-				}
-				else if (tar[0]=="abor")	
-				{
-					tp->dstatus = aborting;
-					throw tp;
-				}
-				else if (tar[0]=="cont" || tar[0]=="r2cu")
-				{
-					tp->dstatus = continuing;
-					for (vector<int>::iterator it = past->pEnv->DebugBreaks[past->pCall->str].begin(); it!=past->pEnv->DebugBreaks[past->pCall->str].end(); it++)
+					if (pastsig->currentLine>=*it) 
 					{
-						if (tp->currentLine>=*it) 
-						{
-							if (it == past->pEnv->DebugBreaks[past->pCall->str].end()-1)
-							{	tp->nextBreakPoint = 0xffff; break; }
-							continue;
-						}
-						tp->nextBreakPoint = *it; 
-					}			
-					if (tar[0]=="r2cu")
-					{
-						if (tp->pEnv->curLine < tp->nextBreakPoint)
-							tp->nextBreakPoint = tp->pEnv->curLine+1;
+						if (it == pastsig->pEnv->DebugBreaks[pastsig->pCall->str].end()-1)
+						{	pastsig->nextBreakPoint = 0xffff; break; }
+						continue;
 					}
-					return 1;
-				}
+					pastsig->nextBreakPoint = *it; 
+				}			
+				return;
+			case debug_Ctrl_F10:
+				pastsig->dstatus = continuing;
+				if (pastsig->pEnv->curLine < pastsig->nextBreakPoint)
+					pastsig->nextBreakPoint = pastsig->pEnv->curLine+1;
+				return;
+			default: //dstatus should be set to null
+				DEBUG_STATUS temp = pastsig->dstatus;
+				pastsig->dstatus = null;
+				mainSpace.computeandshow(buf);
+				pastsig->dstatus = temp;
+				break;
 			}
-			//if it reaches this line, dstatus should be set to null
-			DEBUG_STATUS temp = tp->dstatus;
-			tp->dstatus = null;
-			mainSpace.computeandshow(buf);
-			tp->dstatus = temp;
 		}
 	}
-	return 1;
+	return ;
 }
 
 bool xcom::IsThisBreakpoint(CAstSig *past, const AstNode *pnode)
@@ -1134,10 +1156,11 @@ bool xcom::IsThisBreakpoint(CAstSig *past, const AstNode *pnode)
 	CAstSig *tp = past->son ? past->son : past;
 	if (!tp) return false;
 	if (tp->pEnv->curLine == pnode->line) return true;
+	char name[256];
+	if (past->isthislocaludf()) strcpy(name, past->baseudfname());
+	else strcpy(name, past->Script.c_str());
 	try {
-		//const char* pstr = past->fullUDFpath;
-	//	if (!pstr) return false;
-		vector<int> bpList = past->pEnv->DebugBreaks.at(past->fullUDFpath);
+		vector<int> bpList = past->pEnv->DebugBreaks.at(past->pEnv->UDFsPath[name] );
 		for (vector<int>::iterator it = bpList.begin(); it!=bpList.end(); it++)
 		{
 			if (pnode->line==*it) return true;
@@ -1149,17 +1172,9 @@ bool xcom::IsThisBreakpoint(CAstSig *past, const AstNode *pnode)
 		return false; 	}
 }
 
-void xcom::debug_appl_manager(const CAstSig *debugAstSig, int debug_status, int line)
+void xcom::debug_appl_manager(CAstSig *debugAstSig, DEBUG_STATUS debug_status, int line)
 {
-	switch(debug_status)
-	{
-	case 2: // stepping
-		SendMessage(mShowDlg.hDlg, WM__DEBUG, (WPARAM)&debug_status, (LPARAM)line);
-		break;
-	default:
-		SendMessage(mShowDlg.hDlg, WM__DEBUG, (WPARAM)&debug_status, (LPARAM)debugAstSig);
-		break;
-	}
+	mShowDlg.debug(debug_status, debugAstSig, line);
 }
 
 void xcom::ShowWS_CommandPrompt(CAstSig *pcast)
@@ -1188,14 +1203,14 @@ void xcom::ShowWS_CommandPrompt(CAstSig *pcast)
 		GetConsoleScreenBufferInfo(hStdout, &coninfo);
 		size_t res = ReadThisLine(line, hStdout, coninfo, coninfo.dwCursorPosition.Y, 0);
 		if (res>0) printf("\n");
-		mainSpace.comPrompt = "AUX>";
+		mainSpace.comPrompt = MAIN_PROMPT;
 		printf(mainSpace.comPrompt.c_str());
 	}
 	else
 	{
-		if (!pcast || pcast->dstatus==null)
+		if (!pcast || pcast->dstatus!=null || (pcast->son && pcast->son->dstatus!=null))
 		{
-			mainSpace.comPrompt = "K>";
+			mainSpace.comPrompt = DEBUG_PROMPT;
 			printf(mainSpace.comPrompt.c_str());
 		}
 	}
@@ -1230,6 +1245,7 @@ size_t xcom::ReadHist()
 	while (count<nHistFromFile)
 	{
 		pos = str.find_last_of("\r\n", pos0-2);
+		if (pos == string::npos) break;
 		tempstr = str.substr(pos+1, pos0-pos-2);
 		trim(tempstr, " ");
 		if (!tempstr.empty())
@@ -1297,7 +1313,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	char fullmoduleName[MAX_PATH], moduleName[MAX_PATH];
  	char drive[16], dir[256], ext[8], fname[MAX_PATH], buffer[MAX_PATH], buffer2[MAX_PATH];
 
-	 _set_output_format(_TWO_DIGIT_EXPONENT);
+//	 _set_output_format(_TWO_DIGIT_EXPONENT);
 
 	INITCOMMONCONTROLSEX InitCtrls;
     InitCtrls.dwICC = ICC_LISTVIEW_CLASSES | ICC_LINK_CLASS; // ICC_LINK_CLASS will not work without common control 6.0 which I opted not to use
@@ -1387,7 +1403,6 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	mainSpace.LogHistory(in);
 
 	mainSpace.vecast.push_back(&cast);
-	mainSpace.vecnodeUDF.push_back(NULL);
 
 	CONSOLE_CURSOR_INFO concurinf;
 
@@ -1395,9 +1410,9 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdL
 	concurinf.dwSize = 25;
 	SetConsoleCursorInfo (hStdout, &concurinf);
 
-	mainSpace.gendebugcommandframe();
 	mainSpace.console();
-	closeXcom(mainSpace.AppPath);
+
+	closeXcom(mainSpace.AppPath, globalEnv.UDFs);
 	return 1;
 } 
 

@@ -17,7 +17,7 @@ extern CShowvarDlg mShowDlg;
 extern CHistDlg mHistDlg;
 extern xcom mainSpace;
 
-void closeXcom(const char *AppPath);
+void closeXcom(const char *AppPath, map<string,AstNode *> UDFs);
 
 BOOL CtrlHandler( DWORD fdwCtrlType ) 
 { 
@@ -37,15 +37,15 @@ BOOL CtrlHandler( DWORD fdwCtrlType )
  
     // CTRL-CLOSE: confirm that the user wants to exit. 
     case CTRL_CLOSE_EVENT: 
-		closeXcom(AppPath);
-		printf( "Ctrl-Close event. Exiting..\n" );
-      return( TRUE ); 
+		printf("Ctrl-Close event. Exiting..\n");
+		closeXcom(AppPath, mainSpace.vecast.front()->pEnv->UDFs);
+		return( TRUE );
  
     // Pass other signals to the next handler. 
     case CTRL_BREAK_EVENT: 
 //	  LOGHISTORY("//\t<<CTRL-Break Pressed>>")
       Beep( 1900, 200 ); 
-      printf( "Ctrl-Break event\n\n" );
+      printf( "Exiting with CTRL_BREAK_EVENT" );
       return FALSE; 
  
     case CTRL_LOGOFF_EVENT: 
@@ -166,7 +166,7 @@ size_t ReadTheseLines(char *readbuffer, DWORD &num, HANDLE hCon, CONSOLE_SCREEN_
 	return num;
 }
 
-void xcom::getinput(char* readbuffer)
+DEBUG_KEY xcom::getinput(char* readbuffer)
 {
 	string linebuf;
 	readbuffer[0]=0;
@@ -192,15 +192,18 @@ void xcom::getinput(char* readbuffer)
 	offset = histOffset = buf[0] = 0;
 	bool controlkeydown(false);
 	WORD vcode;
+	DEBUG_KEY retval;
 //	static FILE* fp;
+
+try {
 	while (loop)
 	{		
 //		if (!fp) fp=fopen("in_record","at");
 		ReadConsoleInput(hStdin, in, INRECORD_SIZE, &nRec);
+		if (mainSpace.vecast.size()>1)
+			checkdebugkey(in, nRec);
 //		fprintf(fp,"nRec=%d\n", nRec);
 		//nRec can be greater than one when 1) control-v is pressed (for processed input), or 2) debug command string is dispatched from OnNotify of debugDlg, or 3) maybe in other occassions
-		if (nRec>1) 
-			showscreen = !isdebugcommand(in, nRec);
 		for (UINT k=0; k<nRec; k++)
 		{
 			if (in[k].EventType !=	KEY_EVENT) 	continue;
@@ -245,7 +248,7 @@ void xcom::getinput(char* readbuffer)
 					WriteConsole (hStdout, "\r\n", 2, &dw2, NULL); // this is the real "action" of pressing the return/enter key, exiting from the loop and return out of getinput()
 					break;
 				case VK_CONTROL:
-//			GetConsoleScreenBufferInfo(hStdout, &coninfo);
+			GetConsoleScreenBufferInfo(hStdout, &coninfo);
 //			fprintf(fp," VK_CONTROL current cursor x=%d, y=%d\n", coninfo.dwCursorPosition.X, coninfo.dwCursorPosition.Y);
 					break;
 				case VK_BACK:
@@ -434,21 +437,27 @@ void xcom::getinput(char* readbuffer)
 			}
 		}
 	}
-	if (!debugcommand(readbuffer))
+	// if a block input is given (i.e., control-V), each line is separately saved/logged.
+	size_t count = str2vect(tar, readbuffer, "\r\n");
+	LogHistory(tar);
+	mHistDlg.AppendHist(tar);
+	for (size_t k=0; k<tar.size(); k++)
 	{
-		// if a block input is given (i.e., control-V), each line is separately saved/logged.
-		size_t count = str2vect(tar, readbuffer, "\r\n");
-		LogHistory(tar);
-		mHistDlg.AppendHist(tar);
-		for (size_t k=0; k<tar.size(); k++)
-		{
-			history.push_back(tar[k].c_str());
-			comid++;
-		}
+		history.push_back(tar[k].c_str());
+		comid++;
 	}
-	else
-		SetConsoleCursorPosition (hStdout, coninfo0.dwCursorPosition);
+	retval=non_debug;
+}
+catch (DEBUG_KEY code)
+{
+	//without this, it would keep adding K> to the prompt
+	coninfo0.dwCursorPosition.X -= (SHORT)strlen(DEBUG_PROMPT);
+	SetConsoleCursorPosition (hStdout, coninfo0.dwCursorPosition);
+	retval = code;
+}
 //	fclose(fp);
 //	fp=NULL;
+//	res = ResetEvent(hThEvent);
+	return retval;
 }
 	

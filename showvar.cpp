@@ -54,16 +54,6 @@ uintptr_t hDebugThread2(NULL);
 
 unsigned int WINAPI debugThread2 (PVOID var) ;
 
-bool isWin7()
-{
-	char block[4096];
-	float val;
-	getVersionString("cmd.exe", block, sizeof(block));
-	block[4]=0;
-	sscanf(block+1, "%f", &val);
-	if (val<6.2) return true;
-	else return false;
-}
 
 LRESULT CALLBACK HookProc2(int code, WPARAM wParam, LPARAM lParam)
 {
@@ -279,15 +269,6 @@ BOOL CALLBACK showvarDlg (HWND hDlg, UINT umsg, WPARAM wParam, LPARAM lParam)
 		cvDlg->OnCommand(IDC_REFRESH, NULL, 0);
 		break;
 	}
-	//case WM_SYSCOMMAND:
-
-	case WM__DEBUG:
-		if (wParam)
-			cvDlg->OnDebug(*(DEBUG_STATUS*)wParam, (CAstSig *)lParam, umsg-(WM_APP+4000));
-		else // for file content changed message
-			cvDlg->OnDebug(file_changed, (CAstSig *)lParam, umsg-(WM_APP+4000));
-		break;
-
 	case WM_DEBUG_CLOSE:
 		if (dbmap.find((char*)wParam)!=dbmap.end())
 		{
@@ -330,11 +311,12 @@ void CShowvarDlg::OnVarChanged(char *varname, CSignals *sig)
 		PostThreadMessage(plotDlgThread[varname], WM__VAR_CHANGED, (WPARAM)varname, (LPARAM)sig); // this is processed in HookProc
 }
 
-void CShowvarDlg::OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
+void CShowvarDlg::debug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
 {
 	map<string, CDebugDlg*>::iterator it;
 	LRESULT res;
 	CAstSig *lp;
+	char name[256], basename[256];
 	static	string fullname;
 
 	switch(status)
@@ -347,43 +329,60 @@ void CShowvarDlg::OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
 		for (CAstSig *tp=mainSpace.vecast.front(); res>1; res--)
 		{
 			tp = tp->son;
-			if (mainSpace.vecast.back()!=tp) 
-			{ //when a new debugging instance is initiated and its from a subfunction, this tp is not correct....check exam22(x,a) 10/12/2017
-				mainSpace.vecast.push_back(tp);
-				SendDlgItemMessage(IDC_DEBUGSCOPE, CB_ADDSTRING, 0, (LPARAM)tp->pCall->str);
-			}
+			//when a new debugging instance is initiated and its from a subfunction, this tp is not correct....check exam22(x,a) 10/12/2017
+			SendDlgItemMessage(IDC_DEBUGSCOPE, CB_ADDSTRING, 0, (LPARAM)tp->Script.c_str());
 		}
-	case progress:
+//	case progress:
 		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, SendDlgItemMessage(IDC_DEBUGSCOPE, CB_GETCOUNT)-1);
-		if ((it = dbmap.find(debugAstSig->baseudfname()))==dbmap.end()) 
-		{ // only when debug Dlg is opened by a function with a lower or higher scope
-		  // otherwise debug Dlg's are opened by a button click in the show Dlg, so this can't happen.
-			debugAstSig->OpenFileInPath (debugAstSig->baseudfname(), "aux", fullname);
-
-			::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
-			//Old way---through "Debug" button
-			DWORD id = GetThreadId ((HANDLE) hDebugThread2);
-			PostThreadMessage(id, WM__NEWDEBUGDLG, (WPARAM)fullname.c_str(), 0);
-
-			//New way--using tab control
-			::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
-//			debugBase.open_add_UDF(fullname.c_str(), 1);
-			Sleep(200);
-			TabCtrl_SetCurSel (mTab.hTab, res);
+		lp = mainSpace.vecast.back();
+		strcpy(	name, lp->GetScript().c_str());
+		// is name already open in DebugDlg or not
+		// but if name is local udf, it should not be checked with dbmap
+		res = lp->isthislocaludf();
+		if (res==1) strcpy(	basename, lp->baseudfname());
+		else strcpy(basename, lp->Script.c_str());
+		if (lp->pEnv->UDFs.find(basename)!=lp->pEnv->UDFs.end())
+		{
+			it = dbmap.find(basename); // are you sure this never fails? 10/16/2017
+			lastDebug = it->second;
+			lastDebug->pAstSig = lp;
+			lastDebug->Debug(lp, status, entry);
 		}
-		while ((it = dbmap.find(debugAstSig->baseudfname()))==dbmap.end()) {Sleep(50);};
-		lastDebug = it->second;
-		lastDebug->pAst = debugAstSig;
-		lastDebug->Debug(status);
+		else
+		{
+			if ((it = dbmap.find(name))==dbmap.end()) 
+			{ // only when debug Dlg is opened by a function with a lower or higher scope
+			  // otherwise debug Dlg's are opened by a button click in the show Dlg, so this can't happen.
+				debugAstSig->OpenFileInPath (debugAstSig->baseudfname(), "aux", fullname);
+
+				::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
+				//Old way---through "Debug" button
+				DWORD id = GetThreadId ((HANDLE) hDebugThread2);
+				PostThreadMessage(id, WM__NEWDEBUGDLG, (WPARAM)fullname.c_str(), 0);
+
+				//New way--using tab control
+				::SendMessage(mTab.hTab, TCM_GETITEMCOUNT, 0, 0);
+	//			debugBase.open_add_UDF(fullname.c_str(), 1);
+				Sleep(200);
+				TabCtrl_SetCurSel (mTab.hTab, res);
+			}
+			while ((it = dbmap.find(name))==dbmap.end()) {Sleep(50);};
+			lastDebug = it->second;
+			lastDebug->pAstSig = debugAstSig;
+			lastDebug->Debug(debugAstSig, status);
+		}
 		break;
 	case stepping:
-		lastDebug->Debug(status, (int)debugAstSig);
+		lastDebug->Debug(debugAstSig, status, entry);
 		break;
 	case exiting:
-		res = SendDlgItemMessage(IDC_DEBUGSCOPE, CB_GETCOUNT)-1;
-		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_DELETESTRING, res);
-		SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, res-1);
-		lastDebug->Debug(status);
+		if (debugAstSig) // if called from xcom::cleanup_debug() skip here
+		{
+			res = SendDlgItemMessage(IDC_DEBUGSCOPE, CB_GETCOUNT)-1;
+			SendDlgItemMessage(IDC_DEBUGSCOPE, CB_DELETESTRING, res);
+			SendDlgItemMessage(IDC_DEBUGSCOPE, CB_SETCURSEL, res-1);
+		}
+		lastDebug->Debug(debugAstSig, status);
 		break;
 	case cleanup: // no longer needed 8/2/2017
 		res=mainSpace.vecast.size()-1;
@@ -406,14 +405,14 @@ void CShowvarDlg::OnDebug(DEBUG_STATUS status, CAstSig *debugAstSig, int entry)
 		}
 		mainSpace.vecast.front()->son=NULL;
 		break;
-	case file_changed:
-		it = dbmap.find(string((const char*)debugAstSig));
-		CDebugDlg *mDlg  = it->second;
-		CDebugBaseDlg *mPar = (CDebugBaseDlg*)mDlg->hParent;
+//	case file_changed:
+//		it = dbmap.find(string((const char*)debugAstSig));
+//		CDebugDlg *mDlg  = it->second;
+//		CDebugBaseDlg *mPar = (CDebugBaseDlg*)mDlg->hParent;
 		//(const char*)debugAstSig is udf name
 		// udf_fullpath[udfname] is fullfilepath
-		mDlg->ShowFileContent(mPar->udf_fullpath[(const char*)debugAstSig].c_str()); // udf name
-		break;
+//		mDlg->ShowFileContent(mPar->udf_fullpath[(const char*)debugAstSig].c_str()); // udf name
+//		break;
 	}
 }
 void CShowvarDlg::OnPlotDlgCreated(char *varname, GRAFWNDDLGSTRUCT *pin)
@@ -438,7 +437,6 @@ BOOL CShowvarDlg::OnInitDialog(HWND hwndFocus, LPARAM lParam)
 {
 	CWndDlg::OnInitDialog(hwndFocus, lParam);
 
-	if (isWin7()) win7=true;
 
 	RECT rtDlg;
 	char buf[64];
@@ -665,7 +663,7 @@ void CShowvarDlg::lvInit()
 	::SendMessage(hList2,LVM_SETEXTENDEDLISTVIEWSTYLE,0,LVS_EX_FULLROWSELECT);
 
 	//These two functions are typically called in pair--so sigproc and graffy can communicate with each other for GUI updates, etc.
-	SetHWND_SIGPROC(hDlg);
+	SetHWND_WAVPLAY(hDlg);
 	SetHWND_GRAFFY(hDlg);
 	SendDlgItemMessage(IDC_REFRESH, BM_SETIMAGE, (WPARAM)IMAGE_BITMAP,
 		(LPARAM)LoadImage(hInst,MAKEINTRESOURCE(IDB_BTM_REFRESH),IMAGE_BITMAP,30,30,LR_DEFAULTSIZE));
